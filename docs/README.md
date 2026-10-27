@@ -10,6 +10,8 @@
 | --- | --- |
 | [AGENTS.md](../AGENTS.md) | AIが着手・変更・共有するときに守る方針 |
 | このページ | 関係する調査メモを見つける入口と一覧 |
+| [本番の運用](competition-workflow.md) | 事前に固める操作、当日設定する部分、3人とAIの計測・共有手順 |
+| [練習と公開実践からの知見](lessons-and-sources.md) | ISUCON14・private-isu・公開記事から選んだ方針と根拠 |
 | [メモの雛形](templates/experiment.md) | 一つの調査・改善について記録する項目 |
 
 ## 開始・再開時にそろえる情報
