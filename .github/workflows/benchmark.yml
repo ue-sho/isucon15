@@ -1,0 +1,70 @@
+name: Benchmark
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: benchmark
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    if: vars.BENCH_ENABLED == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, isucon]
+    defaults:
+      run:
+        shell: bash
+    env:
+      REV: ${{ github.event.pull_request.head.sha }}
+      APP_HOST: ${{ vars.APP_HOST }}
+      APP_DIR: ${{ vars.APP_DIR }}
+      DEPLOY_COMMAND: ${{ vars.DEPLOY_COMMAND }}
+      BENCH_HOST: ${{ vars.BENCH_HOST }}
+      BENCH_COMMAND: ${{ vars.BENCH_COMMAND }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Deploy
+        id: deploy
+        run: task deploy
+
+      - name: Benchmark
+        id: bench
+        run: task bench 2>&1 | tee "$RUNNER_TEMP/benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"
+
+      - name: Comment on PR
+        if: always()
+        uses: actions/github-script@v9
+        env:
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          BENCH_OUTCOME: ${{ steps.bench.outcome }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const file = `${process.env.RUNNER_TEMP}/benchmark-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}.log`;
+            const output = fs.existsSync(file)
+              ? fs.readFileSync(file, 'utf8').trim().split('\n').slice(-20).join('\n').slice(-12000)
+              : 'ベンチ出力なし。実行ログを参照してください。';
+            const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: [
+                `対象: \`${process.env.REV}\``,
+                `反映: ${process.env.DEPLOY_OUTCOME} / ベンチ: ${process.env.BENCH_OUTCOME}`,
+                `[実行ログ](${url})`,
+                '',
+                '```text',
+                output,
+                '```',
+              ].join('\n'),
+            });

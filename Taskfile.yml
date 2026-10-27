@@ -1,0 +1,20 @@
+version: '3'
+
+silent: true
+
+tasks:
+  deploy:
+    desc: 指定コミットをアプリサーバーへ反映し、ビルド・再起動コマンドを実行
+    requires:
+      vars: [APP_HOST, APP_DIR, REV, DEPLOY_COMMAND]
+    cmds:
+      - >-
+        ssh {{.APP_HOST | shellQuote}}
+        {{printf "set -eu; cd %s; git fetch origin %s; git checkout --detach FETCH_HEAD; %s" (.APP_DIR | shellQuote) (.REV | shellQuote) .DEPLOY_COMMAND | shellQuote}}
+
+  bench:
+    desc: ベンチサーバーで指定コマンドを1回実行
+    requires:
+      vars: [BENCH_HOST, BENCH_COMMAND]
+    cmds:
+      - ssh {{.BENCH_HOST | shellQuote}} {{.BENCH_COMMAND | shellQuote}}
