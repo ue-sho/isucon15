@@ -21,6 +21,16 @@ tasks:
     cmds:
       - bash isutools/scripts/unlock.sh {{.CLI_ARGS}}
 
+  pprotein:
+    desc: pprotein の UI を開く（ポートフォワード + ブラウザ。Ctrl-C で終了）
+    cmds:
+      - bash isutools/scripts/pprotein.sh
+
+  pprotein:targets:
+    desc: pprotein の計測対象を切り替える（task pprotein:targets -- single|split）
+    cmds:
+      - bash isutools/scripts/pprotein-targets.sh {{.CLI_ARGS}}
+
   log-off:
     desc: 計測をすべて止める設定をコミット（反映は push → task deploy）
     cmds:
