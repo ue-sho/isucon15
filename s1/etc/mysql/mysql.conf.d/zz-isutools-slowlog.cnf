@@ -1,0 +1,5 @@
+# isutools 管理ファイル（task log-on / log-off で再生成される。手で編集しない）
+[mysqld]
+slow_query_log=1
+slow_query_log_file=/var/log/mysql/mysql-slow.log
+long_query_time=0

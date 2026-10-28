@@ -1,0 +1,5 @@
+[
+  {"Type": "httplog", "Label": "s1-httplog", "URL": "http://172.31.3.22:19000/debug/log/httplog", "Duration": 70},
+  {"Type": "slowlog", "Label": "s1-slowlog", "URL": "http://172.31.3.22:19000/debug/log/slowlog", "Duration": 70},
+  {"Type": "pprof", "Label": "s1-pprof", "URL": "http://172.31.3.22:6060/debug/pprof/profile", "Duration": 60}
+]

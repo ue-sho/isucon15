@@ -1,0 +1,11 @@
+[
+  {"Type": "httplog", "Label": "s1-httplog", "URL": "http://172.31.3.22:19000/debug/log/httplog", "Duration": 70},
+  {"Type": "slowlog", "Label": "s1-slowlog", "URL": "http://172.31.3.22:19000/debug/log/slowlog", "Duration": 70},
+  {"Type": "pprof", "Label": "s1-pprof", "URL": "http://172.31.3.22:6060/debug/pprof/profile", "Duration": 60},
+  {"Type": "httplog", "Label": "s2-httplog", "URL": "http://172.31.9.95:19000/debug/log/httplog", "Duration": 70},
+  {"Type": "slowlog", "Label": "s2-slowlog", "URL": "http://172.31.9.95:19000/debug/log/slowlog", "Duration": 70},
+  {"Type": "pprof", "Label": "s2-pprof", "URL": "http://172.31.9.95:6060/debug/pprof/profile", "Duration": 60},
+  {"Type": "httplog", "Label": "s3-httplog", "URL": "http://172.31.6.251:19000/debug/log/httplog", "Duration": 70},
+  {"Type": "slowlog", "Label": "s3-slowlog", "URL": "http://172.31.6.251:19000/debug/log/slowlog", "Duration": 70},
+  {"Type": "pprof", "Label": "s3-pprof", "URL": "http://172.31.6.251:6060/debug/pprof/profile", "Duration": 60}
+]
