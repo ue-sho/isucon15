@@ -13,7 +13,8 @@ disable_original_access_log() {
     return 1
   fi
   for f in "$dir/nginx.conf" "$dir"/sites-available/* "$dir"/conf.d/*.conf "$dir"/sites-enabled/*; do
-    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    [ -f "$f" ] || continue
+    [ ! -L "$f" ] || continue
     [ "$(basename "$f")" != isutools-log.conf ] || continue
     tmp="$(mktemp)"
     awk '{

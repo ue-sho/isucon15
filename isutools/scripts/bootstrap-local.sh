@@ -17,8 +17,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 isu_load_config
 cd "$REPO_ROOT"
 
-if [ "$(git symbolic-ref --quiet --short HEAD || true)" != main ]; then
-  isu_err "bootstrap は main ブランチで実行してください"
+branch="${BOOTSTRAP_BRANCH:-main}"
+if [ "$(git symbolic-ref --quiet --short HEAD || true)" != "$branch" ]; then
+  isu_err "bootstrap は ${branch} ブランチで実行してください"
   exit 1
 fi
 
@@ -93,5 +94,5 @@ if git diff --cached --quiet; then
   exit 0
 fi
 git commit -q -m "chore: import initial server state"
-git push -q origin main
+git push -q origin "$branch"
 isu_info "初期状態をコミットして push しました（$(git rev-parse --short=7 HEAD)）"

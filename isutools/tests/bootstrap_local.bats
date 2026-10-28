@@ -92,3 +92,20 @@ origin_files() { git -C "$TMP/origin.git" ls-tree -r --name-only main; }
   assert_failure
   assert_contains "s2"
 }
+
+@test "explicit bootstrap branch imports and pushes without changing main" {
+  before="$(git rev-parse main)"
+  git switch -q -c test/bootstrap
+  export BOOTSTRAP_BRANCH=test/bootstrap
+  bl
+  assert_success
+  [ "$(git -C "$TMP/origin.git" rev-parse main)" = "$before" ]
+  [ "$(git -C "$TMP/origin.git" log -1 --format=%s test/bootstrap)" = "chore: import initial server state" ]
+}
+
+@test "explicit bootstrap branch rejects a different current branch" {
+  export BOOTSTRAP_BRANCH=test/bootstrap
+  bl
+  assert_failure
+  assert_contains "test/bootstrap"
+}

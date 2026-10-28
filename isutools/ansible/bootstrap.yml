@@ -158,8 +158,9 @@
   gather_facts: false
   vars:
     git_remote: "{{ lookup('env', 'GIT_REMOTE') }}"
+    bootstrap_branch: "{{ lookup('env', 'BOOTSTRAP_BRANCH') | default('main', true) }}"
   tasks:
     - name: Run repo-sync.sh
-      ansible.builtin.script: "{{ playbook_dir }}/../scripts/repo-sync.sh {{ git_remote }} main"
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/repo-sync.sh {{ git_remote | quote }} {{ bootstrap_branch | quote }}"
       register: sync_result
       changed_when: true
