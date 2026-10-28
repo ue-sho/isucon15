@@ -5,7 +5,7 @@
 
 // npm / npx / pnpm / yarn / tsx / ts-node / nodemon は NODE_OPTIONS を引き継いだ子プロセスでアプリを動かす。
 // ランチャーがポートを取ると本物のアプリを計測できないため、ランチャーでは待ち受けない。
-const LAUNCHER = /(?:^|[\\/])(?:npm-cli|npx-cli|pnpm|yarn)\.c?js$|[\\/](?:tsx|ts-node|nodemon|pnpm|yarn)[\\/]/;
+const LAUNCHER = /(?:^|[\\/])(?:(?:npm|npx)(?:-cli)?|pnpm|yarn)(?:\.c?js)?$|[\\/](?:tsx|ts-node|nodemon|pnpm|yarn)[\\/]/;
 
 try {
   if (LAUNCHER.test(process.argv[1] || '')) throw Object.assign(new Error('launcher'), { skip: true });

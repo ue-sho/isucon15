@@ -82,6 +82,8 @@ test('does not keep process alive', async () => {
 // npm / npx / tsx などのランチャーは NODE_OPTIONS を子プロセスに引き継ぐ。
 // ランチャー側がポートを取ると本物のアプリを計測できないため、ランチャーでは待ち受けない。
 for (const launcher of [
+  ['bin', 'npm'],
+  ['bin', 'npx'],
   ['node_modules', 'npm', 'bin', 'npm-cli.js'],
   ['node_modules', 'tsx', 'dist', 'cli.mjs'],
 ]) {

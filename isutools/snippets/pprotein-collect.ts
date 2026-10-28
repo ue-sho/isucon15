@@ -5,7 +5,7 @@
 //   2. POST /api/initialize ハンドラの先頭で triggerPproteinCollect() を呼ぶ（await しない）
 //
 // PPROTEIN_ENABLED / PPROTEIN_URL は systemd drop-in（isutools.conf）から渡される。
-// task log-off で PPROTEIN_ENABLED=0 になるので、最終提出まで残しておいてよい。
+// 自動収集を止める場合は、手動で PPROTEIN_ENABLED=0 に変更する。
 // 失敗してもベンチ（/initialize）には影響させない。
 
 export function triggerPproteinCollect(): void {

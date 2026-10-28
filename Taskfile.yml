@@ -31,16 +31,6 @@ tasks:
     cmds:
       - bash isutools/scripts/pprotein-targets.sh {{.CLI_ARGS}}
 
-  log-off:
-    desc: 計測をすべて止める設定をコミット（反映は push → task deploy）
-    cmds:
-      - bash isutools/scripts/logmode.sh off
-
-  log-on:
-    desc: 計測を再開する設定をコミット（反映は push → task deploy）
-    cmds:
-      - bash isutools/scripts/logmode.sh on
-
   test:
     desc: isutools のテストと lint（開発者向け）
     cmds:

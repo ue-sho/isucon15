@@ -50,7 +50,7 @@ bootstrap を実行する人だけ、追加で `uv tool install ansible-core`（
    | 項目 | 内容 |
    |---|---|
    | `APP_DIR` | アプリのディレクトリ（`/home/isucon` からの相対パス。例: `webapp/nodejs`） |
-   | `APP_SERVICE` | アプリの systemd サービス名（例: `isuride-node.service`）。`systemctl list-units \| grep isu` で確認 |
+   | `APP_SERVICE` | アプリの systemd サービス名（例: `isuapp-node.service`）。実環境で確認 |
    | `BUILD_CMD` | デプロイ時のビルドコマンド（TypeScript をビルドするなら `npm run build`。不要なら空） |
    | `NODE_BIN_DIR` | node / npm の場所。`/home/isucon/local/*/bin` にあるなら空でよい（`ssh s1 'ls ~/local'` で確認） |
    | `DB_SERVICE` | `mysql` か `mariadb` |
@@ -58,9 +58,11 @@ bootstrap を実行する人だけ、追加で `uv tool install ansible-core`（
    | `PPROTEIN_HOST` | pprotein 本体を置くホスト（ベンチで使われない s3 が初期値） |
    | `ENV_FILES` | ISUCON 提供の env ファイル。空なら `APP_SERVICE` の `EnvironmentFile=` から自動検出 |
 
+   使用言語の切替とアプリサービスの有効化・無効化は、実行前に手動で行う。
+   bootstrap はアプリサービスの有効化・無効化を変更しない。
+
 3. `task bootstrap`（main ブランチで実行）。やること:
    - 3台に alp / slp / pprotein-agent（s3 には pprotein も）をインストール
-   - アプリを `APP_SERVICE` に切り替え（同じ問題の他言語の service は disable）
    - 元の `/etc/nginx` `/etc/mysql` を `/home/isucon/backup/` に退避
    - 3台の設定と s1 の `webapp/` を手元に集めて、初期コミットを main に push
    - 3台の `/home/isucon` をこのリポジトリに合わせる
@@ -91,6 +93,9 @@ task deploy          # 現在ブランチを3台に反映（結果は Discord �
 - 他の人がデプロイ中ならロックで止まる。冒頭に「直前に誰が何を反映したか」が出る
 - サーバの設定（nginx / MySQL / systemd）は `s1/` `s2/` `s3/` 配下を編集する。deploy が `/etc` に配置する
   （`/etc` を直接いじっても次のデプロイで上書きされる）
+- ログ・計測の停止と再開は手動で行う。設定変更は該当ホストのファイルに反映する。
+  deploy は有効なサービスだけを再起動し、サービスの有効化・無効化は変更しない。
+  pprotein / agent の初回有効化は bootstrap で行う。
 
 ## コマンド一覧
 
@@ -101,12 +106,11 @@ task deploy          # 現在ブランチを3台に反映（結果は Discord �
 | `task status` | 3台のブランチ / commit / 最終デプロイ者 / サービス状態 / ロック |
 | `task pprotein` | pprotein の UI を開く（Ctrl-C で終了） |
 | `task pprotein:targets -- split` | サーバ分割後に計測対象を全ホストに広げる（戻すときは `single`） |
-| `task log-off` / `task log-on` | 計測の on/off を**コミットするだけ**。push して `task deploy` で反映 |
 | `task unlock` | 異常終了で残ったデプロイロックを解除 |
 
 ## 最終ベンチ前チェックリスト
 
-1. `task log-off` → push → `task deploy`
+1. ログ設定・`PPROTEIN_ENABLED`・`NODE_OPTIONS` を手動で変更し、計測サービスを停止・無効化する
 2. `task status` で全ホストの `agent=inactive` を確認
 3. アクセスログ・slow log が増えていないことを確認
 4. 再起動試験: 3台を再起動して、アプリが動き計測が止まったままであることを確認

@@ -110,21 +110,12 @@ else
 fi
 
 step=pprotein
-dropin="$ISUTOOLS_ETC/systemd/system/$APP_SERVICE.d/isutools.conf"
-if grep -q '^Environment=PPROTEIN_ENABLED=1$' "$dropin" 2>/dev/null; then
-  isu_sudo systemctl enable --now pprotein-agent.service
-  isu_sudo systemctl restart pprotein-agent.service
-  if [ "$HOST" = "$PPROTEIN_HOST" ]; then
-    isu_sudo systemctl enable --now pprotein.service
-    isu_sudo systemctl restart pprotein.service
-  elif [ -f "$ISUTOOLS_ETC/systemd/system/pprotein.service" ]; then
-    isu_sudo systemctl disable --now pprotein.service || true
+# 手動で無効化した計測サービスを再開しない。
+for svc in pprotein-agent.service pprotein.service; do
+  if is_enabled "$svc"; then
+    isu_sudo systemctl restart "$svc"
   fi
-else
-  echo "[$HOST] 計測 off: pprotein を停止"
-  isu_sudo systemctl disable --now pprotein-agent.service || true
-  isu_sudo systemctl disable --now pprotein.service || true
-fi
+done
 
 step=truncate
 for log in "$NGINX_LOG" "$SLOW_LOG"; do

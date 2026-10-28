@@ -6,7 +6,7 @@ setup() {
   export REPO_ROOT="$TMP/repo"
   make_work_repo "$REPO_ROOT"
   printf 'S1_IP=10.0.0.1\nS2_IP=10.0.0.2\nS3_IP=10.0.0.3\n' >"$REPO_ROOT/isutools/hosts.env"
-  REPO_ROOT="$REPO_ROOT" bash -c 'source "$REPO_ROOT/isutools/lib/common.sh"; source "$REPO_ROOT/isutools/lib/render.sh"; isu_load_config; render_all on'
+  REPO_ROOT="$REPO_ROOT" bash -c 'source "$REPO_ROOT/isutools/lib/common.sh"; source "$REPO_ROOT/isutools/lib/render.sh"; isu_load_config; render_all'
 }
 
 pt() { run bash "$REPO_ROOT/isutools/scripts/pprotein-targets.sh" "$@"; }

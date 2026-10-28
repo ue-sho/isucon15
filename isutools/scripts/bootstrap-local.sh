@@ -71,7 +71,7 @@ done
 
 # hosts.env を読み直してから生成
 isu_load_config
-render_all on
+render_all
 
 gitignore_add "debian.cnf"
 large="$(find_large_files webapp "$LARGE_FILE_MB")"
