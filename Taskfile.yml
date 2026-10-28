@@ -6,6 +6,16 @@ tasks:
     cmds:
       - bash isutools/scripts/deploy.sh {{.BRANCH}}
 
+  status:
+    desc: 3台の反映状態（ブランチ / commit / 最終デプロイ者 / サービス / ロック）
+    cmds:
+      - bash isutools/scripts/status.sh
+
+  unlock:
+    desc: 残ってしまったデプロイロックを解除（-- -y で確認省略）
+    cmds:
+      - bash isutools/scripts/unlock.sh {{.CLI_ARGS}}
+
   test:
     desc: isutools のテストと lint（開発者向け）
     cmds:
