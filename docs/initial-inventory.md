@@ -5,20 +5,20 @@
 
 ## 使い方
 
-手元と接続先にPython 3.8以降、手元にSSHが必要です。Pythonの追加パッケージは不要です。
+手元と接続先にPython 3.8以降、手元にSSHとTask（go-task）が必要です。Pythonの追加パッケージは不要です。
 接続には `~/.ssh/config` の設定を利用します。通常のSSHで接続とhost keyの確認を済ませてください。
 
 ```sh
-python3 scripts/initial_inventory.py s1 s2 s3
+task inspect -- s1 s2 s3
 
 # 対象DBを絞る（複数回指定可）
-python3 scripts/initial_inventory.py s1 --database isuride
+task inspect -- s1 --database isuride
 
 # 正確な件数が必要なとき。対象DB名の指定が必須
-python3 scripts/initial_inventory.py s1 --database isuride --exact-counts
+task inspect -- s1 --database isuride --exact-counts
 
 # DBへの接続が不要なホスト
-python3 scripts/initial_inventory.py s1 --no-db
+task inspect -- s1 --no-db
 ```
 
 出力先は `reports/inventory/<UTC取得時刻>/` です。
@@ -67,25 +67,16 @@ NodeはPATHのほか `/home/isucon/local/*/bin/node` と、読み取れる稼働
 [nginxオプション](https://nginx.org/en/docs/switches.html)、
 [MariaDBの実行時間制限](https://mariadb.com/docs/server/ha-and-performance/optimization-and-tuning/query-optimizations/aborting-statements)。
 
-## Taskfileへの接続
+## Taskfile
 
-PR #6のTaskfileとは独立しています。統合するときは、既存の `tasks:` 配下に次の入口を追加できます。
-
-```yaml
-  inspect:
-    desc: 初期構成を調査してMarkdownとJSONに保存
-    cmds:
-      - python3 scripts/initial_inventory.py {{.CLI_ARGS}}
-```
-
-```sh
-task inspect -- s1 s2 s3
-```
+ルートの `Taskfile.yml` に `inspect` と `inspect:test` を用意しています。
+PR #6のTaskfileと統合するときは、既存の `tasks:` 配下にこの2つのタスクを追加してください。
+Taskを使わず `python3 scripts/initial_inventory.py s1 s2 s3` で直接実行することもできます。
 
 ## 開発時の確認
 
 ```sh
-python3 -m unittest discover -s tests -v
+task inspect:test
 ```
 
 コマンド応答とSSHを模擬したテストです。実際のLinuxサーバーへのSSH・sudo・MySQL接続は別途確認してください。

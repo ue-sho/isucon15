@@ -1,0 +1,12 @@
+version: '3'
+
+tasks:
+  inspect:
+    desc: SSH経由で初期構成を調査してMarkdownとJSONに保存
+    cmds:
+      - python3 scripts/initial_inventory.py {{.CLI_ARGS}}
+
+  inspect:test:
+    desc: 初期構成調査のテストを実行
+    cmds:
+      - python3 -m unittest discover -s tests -v
