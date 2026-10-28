@@ -1,0 +1,51 @@
+version: '3'
+
+tasks:
+  bootstrap:
+    desc: 競技開始時に1人が1回だけ実行（Ansible でセットアップ → 初回デプロイ → pprotein 設定）
+    cmds:
+      - bash isutools/scripts/bootstrap.sh {{.BRANCH}}
+
+  deploy:
+    desc: 手元の現在ブランチ（BRANCH=xxx で指定可）を3台すべてにデプロイ
+    cmds:
+      - bash isutools/scripts/deploy.sh {{.BRANCH}}
+
+  status:
+    desc: 3台の反映状態（ブランチ / commit / 最終デプロイ者 / サービス / ロック）
+    cmds:
+      - bash isutools/scripts/status.sh
+
+  unlock:
+    desc: 残ってしまったデプロイロックを解除（-- -y で確認省略）
+    cmds:
+      - bash isutools/scripts/unlock.sh {{.CLI_ARGS}}
+
+  pprotein:
+    desc: pprotein の UI を開く（ポートフォワード + ブラウザ。Ctrl-C で終了）
+    cmds:
+      - bash isutools/scripts/pprotein.sh
+
+  pprotein:targets:
+    desc: pprotein の計測対象を切り替える（task pprotein:targets -- single|split）
+    cmds:
+      - bash isutools/scripts/pprotein-targets.sh {{.CLI_ARGS}}
+
+  log-off:
+    desc: 計測をすべて止める設定をコミット（反映は push → task deploy）
+    cmds:
+      - bash isutools/scripts/logmode.sh off
+
+  log-on:
+    desc: 計測を再開する設定をコミット（反映は push → task deploy）
+    cmds:
+      - bash isutools/scripts/logmode.sh on
+
+  test:
+    desc: isutools のテストと lint（開発者向け）
+    cmds:
+      - bash isutools/tests/lint.sh
+      - bats isutools/tests
+      - cd isutools/profiler && npm ci --no-audit --no-fund --silent
+      - node --test isutools/profiler/profiler.test.cjs
+      - node --experimental-strip-types --test isutools/snippets/pprotein-collect.test.ts
