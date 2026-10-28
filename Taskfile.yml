@@ -1,6 +1,11 @@
 version: '3'
 
 tasks:
+  deploy:
+    desc: 手元の現在ブランチ（BRANCH=xxx で指定可）を3台すべてにデプロイ
+    cmds:
+      - bash isutools/scripts/deploy.sh {{.BRANCH}}
+
   test:
     desc: isutools のテストと lint（開発者向け）
     cmds:
