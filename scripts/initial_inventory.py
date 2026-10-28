@@ -18,11 +18,11 @@ import subprocess
 import sys
 
 
-def run(command, timeout=10):
+def run(command, timeout=10, env=None):
     """Keep stderr in memory: raw errors may contain configuration or credentials."""
     try:
         result = subprocess.run(command, capture_output=True, text=True,
-                                errors="replace", timeout=timeout, check=False)
+                                errors="replace", timeout=timeout, check=False, env=env)
         return result.returncode, result.stdout, result.stderr
     except (OSError, subprocess.TimeoutExpired):
         return -1, "", ""
@@ -98,7 +98,8 @@ def collect_processes(warnings):
 def collect_software(processes, warnings):
     versions = []
     for name, flag, pattern in (("nginx", "-v", r"nginx/[\w.+~-]+"),
-                                ("mysql", "--version", r"(?:Ver|Distrib)\s+[^\s,]+")):
+                                ("mysql", "--version", r"(?:Ver|Distrib)\s+[^\s,]+"),
+                                ("psql", "--version", r"psql \(PostgreSQL\)\s+[^\s]+")):
         binary = executable(name)
         if binary:
             code, out, err = run([binary, flag])
@@ -219,7 +220,7 @@ def count_query(database, table, version):
 
 
 def collect_mysql(args, warnings):
-    if args.no_db:
+    if args.no_db or getattr(args, "db_type", "auto") == "postgresql":
         return {"status": "skipped", "tables": []}
     binary = executable("mysql") or executable("mariadb")
     if not binary:
@@ -258,6 +259,122 @@ def collect_mysql(args, warnings):
             "row_count_mode": "exact-requested" if args.exact_counts else "estimated"}
 
 
+def postgres_sockets():
+    """Find standard local sockets; collect only the first reachable cluster."""
+    sockets = set()
+    for directory in ("/var/run/postgresql", "/tmp"):
+        for path in glob.glob(directory + "/.s.PGSQL.*"):
+            match = re.fullmatch(r"\.s\.PGSQL\.(\d+)", Path(path).name)
+            if match:
+                sockets.add((os.path.realpath(directory), int(match[1])))
+    return sorted(sockets) or [("/var/run/postgresql", 5432), ("/tmp", 5432)]
+
+
+def postgres_query(command, endpoint, database, query, user=None):
+    # A raw dbname containing '=' would be interpreted as another connection string.
+    # Explicit hostaddr plus a clean service environment prevent remote redirection.
+    parameters = {"host": endpoint[0], "hostaddr": "", "port": str(endpoint[1]),
+                  "dbname": database, "connect_timeout": "3", "client_encoding": "UTF8",
+                  "options": "-c statement_timeout=5000 -c default_transaction_read_only=on "
+                             "-c search_path=pg_catalog -c row_security=off"}
+    if user:
+        parameters["user"] = user
+    conninfo = " ".join(key + "='" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+                        for key, value in parameters.items())
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR")}
+    return run([*command, "--dbname", conninfo, "--command", query], timeout=10, env=env)
+
+
+def postgres_metadata_query():
+    # Physical tables include partition leaves; omit storage-free partition parents.
+    return ("SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM ("
+            "SELECT n.nspname AS schema, c.relname AS table, "
+            "CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::bigint END AS estimated_rows, "
+            "pg_total_relation_size(c.oid) AS size_bytes "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE c.relkind = 'r' AND c.relpersistence <> 't' "
+            "AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_' "
+            "AND has_table_privilege(c.oid, 'SELECT') "
+            "ORDER BY n.nspname, c.relname) t;")
+
+
+def collect_postgresql(args, warnings):
+    if args.no_db or getattr(args, "db_type", "auto") == "mysql":
+        return {"status": "skipped", "databases": [], "tables": []}
+    binary = executable("psql")
+    if not binary:
+        return {"status": "not-found", "databases": [], "tables": []}
+    base = [binary, "-X", "--no-password", "--quiet", "--tuples-only", "--no-align",
+            "--set=ON_ERROR_STOP=1"]
+    candidates = [(base, None)]
+    sudo = executable("sudo")
+    if sudo:
+        candidates.append(([sudo, "-n", "-u", "postgres", "--", *base], "postgres"))
+    connection = None
+    for command, user in candidates:
+        for endpoint in postgres_sockets():
+            for database in dict.fromkeys([*args.database, "postgres", "template1"]):
+                code, output, _ = postgres_query(command, endpoint, database, "SHOW server_version;", user)
+                if code == 0 and output.strip():
+                    connection = command, user, endpoint, database, output.strip()
+                    break
+            if connection:
+                break
+        if connection:
+            break
+    if not connection:
+        warnings.append("ローカルPostgreSQLに接続できませんでした（socket・既存の認証設定・権限を確認してください）。")
+        return {"status": "unavailable", "databases": [], "tables": []}
+    command, user, endpoint, initial_database, version = connection
+    query = ("SELECT COALESCE(json_agg(datname ORDER BY datname), '[]'::json) "
+             "FROM pg_database WHERE datallowconn AND NOT datistemplate "
+             "AND has_database_privilege(oid, 'CONNECT');")
+    code, output, _ = postgres_query(command, endpoint, initial_database, query, user)
+    try:
+        databases = json.loads(output) if code == 0 else None
+        if not isinstance(databases, list) or not all(isinstance(name, str) for name in databases):
+            raise ValueError("invalid database list")
+    except (ValueError, TypeError):
+        warnings.append("PostgreSQLのDB一覧は未取得です。")
+        return {"status": "unavailable", "version": version, "databases": [], "tables": []}
+    selected = list(dict.fromkeys(args.database)) if args.database else databases
+    result = {"status": "ok", "version": version, "socket_directory": endpoint[0],
+              "port": endpoint[1], "databases": [name for name in selected if name in databases],
+              "tables": [], "row_count_mode": "exact-requested" if args.exact_counts else "estimated"}
+    for database in selected:
+        if database not in databases:
+            warnings.append(f"PostgreSQLのDB {database} は存在しないか、接続権限がありません。")
+            result["status"] = "partial"
+            continue
+        code, output, _ = postgres_query(command, endpoint, database, postgres_metadata_query(), user)
+        try:
+            tables = json.loads(output) if code == 0 else None
+            if not isinstance(tables, list) or not all(
+                    isinstance(table, dict) and isinstance(table.get("schema"), str)
+                    and isinstance(table.get("table"), str)
+                    and (table.get("estimated_rows") is None or isinstance(table["estimated_rows"], int))
+                    and isinstance(table.get("size_bytes"), int) for table in tables):
+                raise ValueError("invalid table metadata")
+        except (ValueError, TypeError):
+            warnings.append(f"PostgreSQLのDB {database} のテーブル統計は未取得です。")
+            result["status"] = "partial"
+            continue
+        for table in tables:
+            table["database"] = database
+            if args.exact_counts:
+                quoted = ".".join('"' + name.replace('"', '""') + '"'
+                                  for name in (table["schema"], table["table"]))
+                code, output, _ = postgres_query(command, endpoint, database,
+                                                  f"SELECT COUNT(*) FROM ONLY {quoted};", user)
+                table["exact_rows"] = int(output.strip()) if code == 0 and output.strip().isdigit() else None
+                if table["exact_rows"] is None:
+                    warnings.append(f"PostgreSQLの{database}.{table['schema']}.{table['table']}の正確な件数は未取得です（時間上限・権限・行セキュリティ）。")
+                    result["status"] = "partial"
+            result["tables"].append(table)
+    return result
+
+
 def collect(args):
     warnings = []
     hardware = collect_hardware(warnings)
@@ -276,6 +393,7 @@ def collect(args):
             if services[0] == 0 else None,
             "listening_ports": ports[1].splitlines() if ports[0] == 0 else None,
             "nginx": collect_nginx(warnings), "mysql": collect_mysql(args, warnings),
+            "postgresql": collect_postgresql(args, warnings),
             "warnings": warnings}
 
 
@@ -309,7 +427,7 @@ def render_markdown(report):
     for software in report["software"]:
         lines.append(f"| {md(software['name'])} | {md(software['version'])} / {md(software['path'])} / {md(software['source'])} |")
     lines += ["", "installed は検出したバイナリの版、running-process は実行中Nodeの実体から取得した版です。",
-              "MySQLのサーバーバージョンはDB欄を参照してください。", "", "## 稼働サービス", ""]
+              "DBのサーバーバージョンは各DB欄を参照してください。", "", "## 稼働サービス", ""]
     lines += [f"- {md(service)}" for service in report["services"] or []] or ["未取得または対象なし"]
     lines += ["", "## プロセス（引数・環境変数は収集しません）", "", "| 名前 | PID |", "|---|---|"]
     for process in report["processes"] or []:
@@ -334,6 +452,19 @@ def render_markdown(report):
         size = table["size_bytes"]
         size_text = f"{size / 1024**2:.2f}" if size is not None else "未取得"
         lines.append(f"| {md(table['database'])} | {md(table['table'])} | {md(table['engine'])} | {md(table['estimated_rows'])} | {md(table.get('exact_rows', '未実行'))} | {size_text} |")
+    database = report.get("postgresql", {"status": "not-collected", "databases": [], "tables": []})
+    lines += ["", "## ローカルPostgreSQL", "", f"取得状態: {md(database['status'])}",
+              f"サーバーバージョン: {md(database.get('version'))}",
+              f"socket: {md(database.get('socket_directory'))} / port: {md(database.get('port'))}", "",
+              "概算件数は pg_class.reltuples（未解析は未取得）、容量は pg_total_relation_size（インデックス・TOAST含む）です。",
+              "物理テーブルを対象とし、パーティションの親は除外、子は個別に表示します。COUNTはONLYで継承先を除外します。",
+              "接続・SELECT権限のある対象のみ取得します。全テーブルの同時刻スナップショットではありません。", "",
+              "DB一覧: " + (", ".join(md(name) for name in database["databases"]) or "対象なしまたは未取得"), "",
+              "| DB | スキーマ | テーブル | 件数（概算） | 件数（COUNT） | サイズ（MiB） |", "|---|---|---|---:|---:|---:|"]
+    for table in database["tables"]:
+        size = table["size_bytes"]
+        size_text = f"{size / 1024**2:.2f}" if size is not None else "未取得"
+        lines.append(f"| {md(table['database'])} | {md(table['schema'])} | {md(table['table'])} | {md(table['estimated_rows'])} | {md(table.get('exact_rows', '未実行'))} | {size_text} |")
     lines += ["", "## 未取得・確認事項", ""]
     lines += [f"- {md(warning)}" for warning in report["warnings"]] or ["- 自動取得項目の失敗なし。構成の意味・疎通は別途確認してください。"]
     return "\n".join(lines) + "\n"
@@ -341,6 +472,7 @@ def render_markdown(report):
 
 def collect_host(host, args, source):
     remote = ["python3", "-", "--collect"]
+    remote.append("--db-type=" + getattr(args, "db_type", "auto"))
     for database in args.database:
         remote.append(f"--database={database}")
     if args.exact_counts:
@@ -374,6 +506,8 @@ def main():
     parser.add_argument("hosts", nargs="*", help="SSH接続先（例: s1 s2 s3）")
     parser.add_argument("--output", type=Path, default=Path("reports/inventory"))
     parser.add_argument("--database", action="append", default=[], help="対象DB名。複数回指定可")
+    parser.add_argument("--db-type", choices=("auto", "mysql", "postgresql"), default="auto",
+                        help="調査するDBの種類。autoはMySQL/MariaDBとPostgreSQLを調査")
     parser.add_argument("--exact-counts", action="store_true", help="COUNT(*)も実行（各表5秒上限）")
     parser.add_argument("--no-db", action="store_true", help="DBへの接続を省略")
     parser.add_argument("--timeout", type=int, default=120, help="ホストごとの収集上限秒数")
