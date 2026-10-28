@@ -91,8 +91,10 @@ Taskを使わず `python3 scripts/initial_inventory.py s1 s2 s3` で直接実行
 ## 開発時の確認
 
 ```sh
+python3 -m unittest discover -s tests -v
 python3 -m py_compile scripts/initial_inventory.py
 python3 scripts/initial_inventory.py --help
 ```
 
-構文と引数の確認です。実際のLinuxサーバーへのSSH・sudo・MySQL/MariaDB・PostgreSQL接続は別途確認してください。
+テストでは外部コマンドをモックし、DBの接続探索順・部分失敗時の継続、Nodeの検出、SSH引数、出力形式とCLIを確認します。
+構文と引数も確認できます。実際のLinuxサーバーへのSSH・sudo・MySQL/MariaDB・PostgreSQL接続は別途確認してください。

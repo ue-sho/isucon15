@@ -5,7 +5,9 @@ import argparse
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import partial
 import glob
+from itertools import product
 import json
 import os
 from pathlib import Path
@@ -16,6 +18,12 @@ import shutil
 import socket
 import subprocess
 import sys
+
+
+MARKDOWN_ESCAPES = str.maketrans({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "|": "&#124;", "`": "&#96;",
+    "\n": " ", "\r": " ",
+})
 
 
 def run(command, timeout=10, env=None):
@@ -41,10 +49,10 @@ def executable(name):
 
 def privileged_read(command, timeout=10):
     result = run(command, timeout)
+    if result[0] == 0:
+        return result
     sudo = executable("sudo")
-    if result[0] != 0 and sudo:
-        result = run([sudo, "-n", "--", *command], timeout)
-    return result
+    return run([sudo, "-n", "--", *command], timeout) if sudo else result
 
 
 def read_text(path):
@@ -59,8 +67,8 @@ def collect_hardware(warnings):
     memory = {key: int(value) * 1024 for key, value in
               re.findall(r"^(\w+):\s+(\d+) kB$", read_text("/proc/meminfo"), re.M)}
     os_release = re.search(r'^PRETTY_NAME=(.+)$', read_text("/etc/os-release"), re.M)
-    virt = run(["systemd-detect-virt"])
-    virtualization = virt[1].strip() if virt[0] in (0, 1) and virt[1].strip() else None
+    code, output, _ = run(["systemd-detect-virt"])
+    virtualization = (output.strip() or None) if code in (0, 1) else None
     if model is None:
         warnings.append("CPUモデルは未取得です。")
     if not memory:
@@ -95,20 +103,7 @@ def collect_processes(warnings):
     return [{"name": name, "pids": pids} for name, pids in sorted(groups.items())]
 
 
-def collect_software(processes, warnings):
-    versions = []
-    for name, flag, pattern in (("nginx", "-v", r"nginx/[\w.+~-]+"),
-                                ("mysql", "--version", r"(?:Ver|Distrib)\s+[^\s,]+"),
-                                ("psql", "--version", r"psql \(PostgreSQL\)\s+[^\s]+")):
-        binary = executable(name)
-        if binary:
-            code, out, err = run([binary, flag])
-            match = re.search(pattern, out + err)
-            if code == 0 and match:
-                versions.append({"name": name, "version": match[0], "path": binary,
-                                 "source": "installed"})
-            else:
-                warnings.append(f"{name}のバージョンは未取得です。")
+def node_executables(processes, warnings):
     nodes = {}
     for name in ("node", "nodejs"):
         binary = executable(name)
@@ -117,18 +112,38 @@ def collect_software(processes, warnings):
     for binary in glob.glob("/home/isucon/local/*/bin/node"):
         nodes[os.path.realpath(binary)] = "installed"
     for process in processes or []:
-        if process["name"] in ("node", "nodejs"):
-            for pid in process["pids"]:
-                try:
-                    binary = os.readlink(f"/proc/{pid}/exe")
-                    if Path(binary).is_file():
-                        nodes[binary] = "running-process"
-                except OSError:
-                    warnings.append(f"PID {pid}のNode実行ファイルは未取得です。")
-    for binary, source in sorted(nodes.items()):
+        if process["name"] not in ("node", "nodejs"):
+            continue
+        for pid in process["pids"]:
+            try:
+                binary = os.readlink(f"/proc/{pid}/exe")
+                if Path(binary).is_file():
+                    nodes[binary] = "running-process"
+            except OSError:
+                warnings.append(f"PID {pid}のNode実行ファイルは未取得です。")
+    return nodes
+
+
+def collect_software(processes, warnings):
+    versions = []
+    for name, flag, pattern in (("nginx", "-v", r"nginx/[\w.+~-]+"),
+                                ("mysql", "--version", r"(?:Ver|Distrib)\s+[^\s,]+"),
+                                ("psql", "--version", r"psql \(PostgreSQL\)\s+[^\s]+")):
+        binary = executable(name)
+        if not binary:
+            continue
+        code, out, err = run([binary, flag])
+        match = re.search(pattern, out + err)
+        if code == 0 and match:
+            versions.append({"name": name, "version": match[0], "path": binary,
+                             "source": "installed"})
+        else:
+            warnings.append(f"{name}のバージョンは未取得です。")
+    for binary, source in sorted(node_executables(processes, warnings).items()):
         code, out, _ = run([binary, "--version"])
-        if code == 0 and re.fullmatch(r"v\d+[\w.+~-]*", out.strip()):
-            versions.append({"name": "node", "version": out.strip(), "path": binary,
+        version = out.strip()
+        if code == 0 and re.fullmatch(r"v\d+[\w.+~-]*", version):
+            versions.append({"name": "node", "version": version, "path": binary,
                              "source": source})
         else:
             warnings.append("検出したNodeのバージョンを取得できませんでした。")
@@ -169,11 +184,12 @@ def parse_nginx_config(text):
             continue
         line_number += 1
         match = re.match(r"^\s*(listen|server_name|location|proxy_pass|root|alias|upstream|server)\s+(.+)$", line)
-        if match:
-            value = nginx_value(match[2])
-            if value:
-                directives.append({"file": filename, "line": line_number,
-                                   "directive": match[1], "value": redact_url(value)})
+        if not match:
+            continue
+        value = nginx_value(match[2])
+        if value:
+            directives.append({"file": filename, "line": line_number,
+                               "directive": match[1], "value": redact_url(value)})
     return directives
 
 
@@ -212,11 +228,26 @@ def parse_mysql_tables(text):
     return tables
 
 
+def quote_identifiers(*names, quote='"'):
+    return ".".join(quote + name.replace(quote, quote * 2) + quote for name in names)
+
+
 def count_query(database, table, version):
     # This connection only. If the limit cannot be set, the client stops before COUNT.
     limit = "max_statement_time = 5" if "mariadb" in version.lower() else "max_execution_time = 5000"
-    quoted = ".".join("`" + name.replace("`", "``") + "`" for name in (database, table))
+    quoted = quote_identifiers(database, table, quote="`")
     return f"SET SESSION {limit}; SELECT COUNT(*) FROM {quoted};"
+
+
+def parse_row_count(code, output):
+    """Accept one non-negative integer; treat malformed COUNT output as unavailable."""
+    value = output.strip()
+    if code != 0 or not re.fullmatch(r"[0-9]+", value):
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def collect_mysql(args, warnings):
@@ -234,16 +265,16 @@ def collect_mysql(args, warnings):
         candidates.append([sudo, "-n", "--", *base])
     for command in candidates:
         code, output, _ = run([*command, "--execute", "SELECT VERSION();"])
-        if code == 0 and output.strip():
+        version = output.strip()
+        if code == 0 and version:
             break
     else:
         warnings.append("ローカルDBに接続できませんでした（既存のクライアント設定・権限を確認してください）。")
         return {"status": "unavailable", "tables": []}
-    version = output.strip()
     code, output, _ = run([*command, "--execute", mysql_metadata_query(args.database)], timeout=15)
     try:
         tables = parse_mysql_tables(output) if code == 0 else None
-    except (ValueError, UnicodeError):
+    except ValueError:
         tables = None
     if tables is None:
         warnings.append("DBテーブル統計は未取得です。")
@@ -252,7 +283,7 @@ def collect_mysql(args, warnings):
         for table in tables:
             query = count_query(table["database"], table["table"], version)
             code, output, _ = run([*command, "--execute", query], timeout=10)
-            table["exact_rows"] = int(output.strip()) if code == 0 and output.strip().isdigit() else None
+            table["exact_rows"] = parse_row_count(code, output)
             if table["exact_rows"] is None:
                 warnings.append(f"{table['database']}.{table['table']}の正確な件数は未取得です（時間上限または権限）。")
     return {"status": "ok", "version": version, "tables": tables,
@@ -299,79 +330,97 @@ def postgres_metadata_query():
             "ORDER BY n.nspname, c.relname) t;")
 
 
-def collect_postgresql(args, warnings):
-    if args.no_db or getattr(args, "db_type", "auto") == "mysql":
-        return {"status": "skipped", "databases": [], "tables": []}
-    binary = executable("psql")
-    if not binary:
-        return {"status": "not-found", "databases": [], "tables": []}
+def find_postgres_connection(binary, databases):
+    """Try each user's endpoints and databases in order, stopping at first success."""
     base = [binary, "-X", "--no-password", "--quiet", "--tuples-only", "--no-align",
             "--set=ON_ERROR_STOP=1"]
     candidates = [(base, None)]
     sudo = executable("sudo")
     if sudo:
         candidates.append(([sudo, "-n", "-u", "postgres", "--", *base], "postgres"))
-    connection = None
-    for command, user in candidates:
-        for endpoint in postgres_sockets():
-            for database in dict.fromkeys([*args.database, "postgres", "template1"]):
-                code, output, _ = postgres_query(command, endpoint, database, "SHOW server_version;", user)
-                if code == 0 and output.strip():
-                    connection = command, user, endpoint, database, output.strip()
-                    break
-            if connection:
-                break
-        if connection:
-            break
+    endpoints = postgres_sockets()
+    initial_databases = list(dict.fromkeys([*databases, "postgres", "template1"]))
+    for (command, user), endpoint, database in product(candidates, endpoints, initial_databases):
+        code, output, _ = postgres_query(command, endpoint, database, "SHOW server_version;", user)
+        version = output.strip()
+        if code == 0 and version:
+            return command, user, endpoint, database, version
+    return None
+
+
+def parse_json_list(code, output, valid_item):
+    if code != 0:
+        return None
+    try:
+        items = json.loads(output)
+        if isinstance(items, list) and all(valid_item(item) for item in items):
+            return items
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def valid_postgres_table(table):
+    return (isinstance(table, dict) and isinstance(table.get("schema"), str)
+            and isinstance(table.get("table"), str)
+            and (table.get("estimated_rows") is None or isinstance(table["estimated_rows"], int))
+            and isinstance(table.get("size_bytes"), int))
+
+
+def collect_postgres_tables(execute, database, exact_counts, warnings):
+    code, output, _ = execute(database, postgres_metadata_query())
+    tables = parse_json_list(code, output, valid_postgres_table)
+    if tables is None:
+        warnings.append(f"PostgreSQLのDB {database} のテーブル統計は未取得です。")
+        return [], "partial"
+    status = "ok"
+    for table in tables:
+        table["database"] = database
+        if not exact_counts:
+            continue
+        quoted = quote_identifiers(table["schema"], table["table"])
+        code, output, _ = execute(database, f"SELECT COUNT(*) FROM ONLY {quoted};")
+        table["exact_rows"] = parse_row_count(code, output)
+        if table["exact_rows"] is None:
+            warnings.append(f"PostgreSQLの{database}.{table['schema']}.{table['table']}の正確な件数は未取得です（時間上限・権限・行セキュリティ）。")
+            status = "partial"
+    return tables, status
+
+
+def collect_postgresql(args, warnings):
+    if args.no_db or getattr(args, "db_type", "auto") == "mysql":
+        return {"status": "skipped", "databases": [], "tables": []}
+    binary = executable("psql")
+    if not binary:
+        return {"status": "not-found", "databases": [], "tables": []}
+    connection = find_postgres_connection(binary, args.database)
     if not connection:
         warnings.append("ローカルPostgreSQLに接続できませんでした（socket・既存の認証設定・権限を確認してください）。")
         return {"status": "unavailable", "databases": [], "tables": []}
     command, user, endpoint, initial_database, version = connection
+    execute = partial(postgres_query, command, endpoint, user=user)
     query = ("SELECT COALESCE(json_agg(datname ORDER BY datname), '[]'::json) "
              "FROM pg_database WHERE datallowconn AND NOT datistemplate "
              "AND has_database_privilege(oid, 'CONNECT');")
-    code, output, _ = postgres_query(command, endpoint, initial_database, query, user)
-    try:
-        databases = json.loads(output) if code == 0 else None
-        if not isinstance(databases, list) or not all(isinstance(name, str) for name in databases):
-            raise ValueError("invalid database list")
-    except (ValueError, TypeError):
+    code, output, _ = execute(initial_database, query)
+    databases = parse_json_list(code, output, lambda name: isinstance(name, str))
+    if databases is None:
         warnings.append("PostgreSQLのDB一覧は未取得です。")
         return {"status": "unavailable", "version": version, "databases": [], "tables": []}
+    available_databases = set(databases)
     selected = list(dict.fromkeys(args.database)) if args.database else databases
     result = {"status": "ok", "version": version, "socket_directory": endpoint[0],
-              "port": endpoint[1], "databases": [name for name in selected if name in databases],
+              "port": endpoint[1], "databases": [name for name in selected if name in available_databases],
               "tables": [], "row_count_mode": "exact-requested" if args.exact_counts else "estimated"}
     for database in selected:
-        if database not in databases:
+        if database not in available_databases:
             warnings.append(f"PostgreSQLのDB {database} は存在しないか、接続権限がありません。")
             result["status"] = "partial"
             continue
-        code, output, _ = postgres_query(command, endpoint, database, postgres_metadata_query(), user)
-        try:
-            tables = json.loads(output) if code == 0 else None
-            if not isinstance(tables, list) or not all(
-                    isinstance(table, dict) and isinstance(table.get("schema"), str)
-                    and isinstance(table.get("table"), str)
-                    and (table.get("estimated_rows") is None or isinstance(table["estimated_rows"], int))
-                    and isinstance(table.get("size_bytes"), int) for table in tables):
-                raise ValueError("invalid table metadata")
-        except (ValueError, TypeError):
-            warnings.append(f"PostgreSQLのDB {database} のテーブル統計は未取得です。")
+        tables, status = collect_postgres_tables(execute, database, args.exact_counts, warnings)
+        result["tables"].extend(tables)
+        if status == "partial":
             result["status"] = "partial"
-            continue
-        for table in tables:
-            table["database"] = database
-            if args.exact_counts:
-                quoted = ".".join('"' + name.replace('"', '""') + '"'
-                                  for name in (table["schema"], table["table"]))
-                code, output, _ = postgres_query(command, endpoint, database,
-                                                  f"SELECT COUNT(*) FROM ONLY {quoted};", user)
-                table["exact_rows"] = int(output.strip()) if code == 0 and output.strip().isdigit() else None
-                if table["exact_rows"] is None:
-                    warnings.append(f"PostgreSQLの{database}.{table['schema']}.{table['table']}の正確な件数は未取得です（時間上限・権限・行セキュリティ）。")
-                    result["status"] = "partial"
-            result["tables"].append(table)
     return result
 
 
@@ -398,15 +447,22 @@ def collect(args):
 
 
 def md(value):
-    value = str(value if value is not None else "未取得")
-    for before, after in (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"),
-                          ("|", "&#124;"), ("`", "&#96;"), ("\n", " "), ("\r", " ")):
-        value = value.replace(before, after)
-    return value
+    return str(value if value is not None else "未取得").translate(MARKDOWN_ESCAPES)
 
 
 def gib(value):
     return f"{value / 1024**3:.2f} GiB" if value is not None else "未取得"
+
+
+def render_database_rows(tables, columns):
+    lines = []
+    for table in tables:
+        size = table["size_bytes"]
+        values = [table[column] for column in columns]
+        values += [table["estimated_rows"], table.get("exact_rows", "未実行"),
+                   f"{size / 1024**2:.2f}" if size is not None else "未取得"]
+        lines.append("| " + " | ".join(md(value) for value in values) + " |")
+    return lines
 
 
 def render_markdown(report):
@@ -448,10 +504,7 @@ def render_markdown(report):
               "概算件数は information_schema.TABLES.TABLE_ROWS、サイズは DATA_LENGTH + INDEX_LENGTH です。",
               "接続ユーザーから見えるBASE TABLEのみ対象です。全テーブルの同時刻スナップショットではありません。", "",
               "| DB | テーブル | Engine | 件数（概算） | 件数（COUNT） | サイズ（MiB・概算） |", "|---|---|---|---:|---:|---:|"]
-    for table in database["tables"]:
-        size = table["size_bytes"]
-        size_text = f"{size / 1024**2:.2f}" if size is not None else "未取得"
-        lines.append(f"| {md(table['database'])} | {md(table['table'])} | {md(table['engine'])} | {md(table['estimated_rows'])} | {md(table.get('exact_rows', '未実行'))} | {size_text} |")
+    lines += render_database_rows(database["tables"], ("database", "table", "engine"))
     database = report.get("postgresql", {"status": "not-collected", "databases": [], "tables": []})
     lines += ["", "## ローカルPostgreSQL", "", f"取得状態: {md(database['status'])}",
               f"サーバーバージョン: {md(database.get('version'))}",
@@ -461,20 +514,19 @@ def render_markdown(report):
               "接続・SELECT権限のある対象のみ取得します。全テーブルの同時刻スナップショットではありません。", "",
               "DB一覧: " + (", ".join(md(name) for name in database["databases"]) or "対象なしまたは未取得"), "",
               "| DB | スキーマ | テーブル | 件数（概算） | 件数（COUNT） | サイズ（MiB） |", "|---|---|---|---:|---:|---:|"]
-    for table in database["tables"]:
-        size = table["size_bytes"]
-        size_text = f"{size / 1024**2:.2f}" if size is not None else "未取得"
-        lines.append(f"| {md(table['database'])} | {md(table['schema'])} | {md(table['table'])} | {md(table['estimated_rows'])} | {md(table.get('exact_rows', '未実行'))} | {size_text} |")
+    lines += render_database_rows(database["tables"], ("database", "schema", "table"))
     lines += ["", "## 未取得・確認事項", ""]
     lines += [f"- {md(warning)}" for warning in report["warnings"]] or ["- 自動取得項目の失敗なし。構成の意味・疎通は別途確認してください。"]
     return "\n".join(lines) + "\n"
 
 
+def host_error(host, message):
+    return {"target": host, "collected_at": datetime.now(timezone.utc).isoformat(), "error": message}
+
+
 def collect_host(host, args, source):
-    remote = ["python3", "-", "--collect"]
-    remote.append("--db-type=" + getattr(args, "db_type", "auto"))
-    for database in args.database:
-        remote.append(f"--database={database}")
+    remote = ["python3", "-", "--collect", "--db-type=" + getattr(args, "db_type", "auto")]
+    remote.extend(f"--database={database}" for database in args.database)
     if args.exact_counts:
         remote.append("--exact-counts")
     if args.no_db:
@@ -485,23 +537,22 @@ def collect_host(host, args, source):
         result = subprocess.run(command, input=source, capture_output=True, text=True,
                                 errors="replace", timeout=args.timeout, check=False)
         if result.returncode != 0:
-            error = "SSH接続またはリモート収集に失敗しました。SSH設定と接続先のpython3を確認してください。"
-        else:
-            report = json.loads(result.stdout)
-            if not isinstance(report, dict) or report.get("schema_version") != 1:
-                raise ValueError("invalid report")
-            report["target"] = host
-            # Reject incomplete output here so one bad host cannot break saving the others.
-            render_markdown(report)
-            return report
+            return host_error(host, "SSH接続またはリモート収集に失敗しました。SSH設定と接続先のpython3を確認してください。")
+        report = json.loads(result.stdout)
+        if not isinstance(report, dict) or report.get("schema_version") != 1:
+            raise ValueError("invalid report")
+        report["target"] = host
+        # Reject incomplete output here so one bad host cannot break saving the others.
+        render_markdown(report)
+        return report
     except subprocess.TimeoutExpired:
         error = f"収集が{args.timeout}秒でタイムアウトしました。"
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         error = "SSHを実行できないか、収集結果の形式が不正です。"
-    return {"target": host, "collected_at": datetime.now(timezone.utc).isoformat(), "error": error}
+    return host_error(host, error)
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("hosts", nargs="*", help="SSH接続先（例: s1 s2 s3）")
     parser.add_argument("--output", type=Path, default=Path("reports/inventory"))
@@ -518,12 +569,19 @@ def main():
     if any(not database for database in args.database) or args.timeout <= 0:
         parser.error("DB名は空にできません。--timeoutは正の整数で指定してください。")
     if args.collect:
-        print(json.dumps(collect(args), ensure_ascii=False))
-        return 0
+        return args
     if not args.hosts:
         parser.error("SSH接続先を指定してください（例: s1 s2 s3）。")
     if any(host.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_.@:%\[\]-]+", host) for host in args.hosts):
         parser.error("SSH接続先にはHost名、user@host、IPアドレスを指定してください。")
+    return args
+
+
+def main():
+    args = parse_args()
+    if args.collect:
+        print(json.dumps(collect(args), ensure_ascii=False))
+        return 0
     hosts = list(dict.fromkeys(args.hosts))
     directory = args.output / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     directory.mkdir(parents=True, exist_ok=False)
