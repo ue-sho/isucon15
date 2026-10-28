@@ -48,6 +48,20 @@ _targets_json() {
   printf '\n]\n'
 }
 
+# slowlog_cnf_path <host> — slow log 設定を置くパス（REPO_ROOT からの相対）
+# my.cnf は conf.d/ の後に mysql.conf.d/（MariaDB は mariadb.conf.d/）を読むため、
+# 既存の mysqld.cnf 等に上書きされないよう、最後に読まれるディレクトリの zz- ファイルに置く
+slowlog_cnf_path() {
+  local d
+  for d in mariadb.conf.d mysql.conf.d; do
+    if [ -d "$REPO_ROOT/$1/etc/mysql/$d" ]; then
+      echo "$1/etc/mysql/$d/zz-isutools-slowlog.cnf"
+      return
+    fi
+  done
+  echo "$1/etc/mysql/conf.d/zz-isutools-slowlog.cnf"
+}
+
 # render_all <on|off>
 render_all() {
   local mode="$1"
@@ -77,7 +91,7 @@ slow_query_log_file=$SLOW_LOG
 long_query_time=0"
     app_env="Environment=PPROTEIN_ENABLED=1
 Environment=PPROTEIN_URL=http://$pprotein_ip:9000
-Environment=NODE_OPTIONS=--require $SERVER_HOME/isutools/profiler/profiler.cjs"
+Environment=\"NODE_OPTIONS=--require $SERVER_HOME/isutools/profiler/profiler.cjs\""
   else
     access_log="access_log off;"
     slowlog="slow_query_log=0"
@@ -88,7 +102,12 @@ Environment=PPROTEIN_URL=http://$pprotein_ip:9000"
   for h in $HOSTS; do
     local etc="$REPO_ROOT/$h/etc"
     _render_template nginx-log.conf "$etc/nginx/conf.d/isutools-log.conf" ACCESS_LOG "$access_log"
-    _render_template mysql-slowlog.cnf "$etc/mysql/conf.d/isutools-slowlog.cnf" SLOWLOG_SETTINGS "$slowlog"
+    local cnf d
+    cnf="$(slowlog_cnf_path "$h")"
+    for d in conf.d mysql.conf.d mariadb.conf.d; do
+      [ "$h/etc/mysql/$d/zz-isutools-slowlog.cnf" = "$cnf" ] || rm -f "$etc/mysql/$d/zz-isutools-slowlog.cnf"
+    done
+    _render_template mysql-slowlog.cnf "$REPO_ROOT/$cnf" SLOWLOG_SETTINGS "$slowlog"
     _render_template app-dropin.conf "$etc/systemd/system/$APP_SERVICE.d/isutools.conf" APP_ENV "$app_env"
     _render_template pprotein-agent.service "$etc/systemd/system/pprotein-agent.service" \
       NGINX_LOG "$NGINX_LOG" SLOW_LOG "$SLOW_LOG"

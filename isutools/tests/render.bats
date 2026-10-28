@@ -19,14 +19,14 @@ dropin() { echo "$REPO_ROOT/$1/etc/systemd/system/isuapp-node.service.d/isutools
   render "render_all on"
   assert_success
   for h in s1 s2 s3; do
-    f="$REPO_ROOT/$h/etc/mysql/conf.d/isutools-slowlog.cnf"
+    f="$REPO_ROOT/$h/etc/mysql/conf.d/zz-isutools-slowlog.cnf"
     assert_file_contains "$f" "[mysqld]"
     assert_file_contains "$f" "slow_query_log=1"
     assert_file_contains "$f" "long_query_time=0"
     assert_file_contains "$f" "slow_query_log_file=/var/log/mysql/mysql-slow.log"
     assert_file_contains "$REPO_ROOT/$h/etc/nginx/conf.d/isutools-log.conf" "access_log /var/log/nginx/access.log isutools_ltsv;"
     assert_file_contains "$(dropin "$h")" "PPROTEIN_ENABLED=1"
-    assert_file_contains "$(dropin "$h")" "NODE_OPTIONS=--require /home/isucon/isutools/profiler/profiler.cjs"
+    assert_file_contains "$(dropin "$h")" 'Environment="NODE_OPTIONS=--require /home/isucon/isutools/profiler/profiler.cjs"'
     assert_file_contains "$REPO_ROOT/$h/etc/systemd/system/pprotein-agent.service" "PPROTEIN_HTTPLOG=/var/log/nginx/access.log"
   done
 }
@@ -37,8 +37,8 @@ dropin() { echo "$REPO_ROOT/$1/etc/systemd/system/isuapp-node.service.d/isutools
   for h in s1 s2 s3; do
     assert_file_contains "$REPO_ROOT/$h/etc/nginx/conf.d/isutools-log.conf" "access_log off;"
     assert_file_contains "$REPO_ROOT/$h/etc/nginx/conf.d/isutools-log.conf" "log_format isutools_ltsv"
-    assert_file_contains "$REPO_ROOT/$h/etc/mysql/conf.d/isutools-slowlog.cnf" "slow_query_log=0"
-    refute_file_contains "$REPO_ROOT/$h/etc/mysql/conf.d/isutools-slowlog.cnf" "long_query_time=0"
+    assert_file_contains "$REPO_ROOT/$h/etc/mysql/conf.d/zz-isutools-slowlog.cnf" "slow_query_log=0"
+    refute_file_contains "$REPO_ROOT/$h/etc/mysql/conf.d/zz-isutools-slowlog.cnf" "long_query_time=0"
     assert_file_contains "$(dropin "$h")" "PPROTEIN_ENABLED=0"
     refute_file_contains "$(dropin "$h")" "NODE_OPTIONS"
   done
@@ -93,4 +93,30 @@ dropin() { echo "$REPO_ROOT/$1/etc/systemd/system/isuapp-node.service.d/isutools
   render "render_all on"
   assert_failure
   assert_contains "hosts.env"
+}
+
+@test "every Environment= value in the drop-in is free of unquoted whitespace" {
+  render "render_all on"
+  assert_success
+  # systemd は Environment= を空白で分割するため、空白を含む代入は全体をクォートする必要がある
+  run grep -E '^Environment=[^"].* ' "$(dropin s1)"
+  [ "$status" -ne 0 ]
+}
+
+@test "slow log cnf goes to mysql.conf.d when present (read after conf.d)" {
+  mkdir -p "$REPO_ROOT/s1/etc/mysql/mysql.conf.d" "$REPO_ROOT/s2/etc/mysql/mariadb.conf.d"
+  render "render_all on"
+  assert_success
+  assert_file_contains "$REPO_ROOT/s1/etc/mysql/mysql.conf.d/zz-isutools-slowlog.cnf" "long_query_time=0"
+  assert_file_contains "$REPO_ROOT/s2/etc/mysql/mariadb.conf.d/zz-isutools-slowlog.cnf" "long_query_time=0"
+  assert_file_contains "$REPO_ROOT/s3/etc/mysql/conf.d/zz-isutools-slowlog.cnf" "long_query_time=0"
+  [ ! -e "$REPO_ROOT/s1/etc/mysql/conf.d/zz-isutools-slowlog.cnf" ]
+}
+
+@test "slowlog_cnf_path reports the rendered location" {
+  mkdir -p "$REPO_ROOT/s1/etc/mysql/mysql.conf.d"
+  render "slowlog_cnf_path s1; slowlog_cnf_path s3"
+  assert_success
+  [ "${lines[0]}" = s1/etc/mysql/mysql.conf.d/zz-isutools-slowlog.cnf ]
+  [ "${lines[1]}" = s3/etc/mysql/conf.d/zz-isutools-slowlog.cnf ]
 }

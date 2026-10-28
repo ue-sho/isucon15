@@ -30,7 +30,7 @@ paths=""
 for h in $HOSTS; do
   for f in \
     "$h/etc/nginx/conf.d/isutools-log.conf" \
-    "$h/etc/mysql/conf.d/isutools-slowlog.cnf" \
+    "$(slowlog_cnf_path "$h")" \
     "$h/etc/systemd/system/$APP_SERVICE.d/isutools.conf" \
     "$h/etc/systemd/system/pprotein-agent.service" \
     "$h/etc/systemd/system/pprotein.service"; do

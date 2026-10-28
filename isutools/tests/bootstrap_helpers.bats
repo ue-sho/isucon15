@@ -76,3 +76,19 @@ EOF
   assert_success
   [ "$output" = sql/big.sql ]
 }
+
+@test "disable_original_access_log also covers conf.d and real files in sites-enabled" {
+  mkdir -p "$N/conf.d" "$N/sites-enabled"
+  printf 'server {\n  access_log /var/log/nginx/conf-d.log;\n}\n' >"$N/conf.d/app.conf"
+  printf 'access_log /var/log/nginx/access.log isutools_ltsv;\n' >"$N/conf.d/isutools-log.conf"
+  printf 'server {\n  access_log /var/log/nginx/real.log;\n}\n' >"$N/sites-enabled/real.conf"
+  ln -s ../sites-available/isuapp.conf "$N/sites-enabled/isuapp.conf"
+  h "disable_original_access_log '$N'"
+  assert_success
+  assert_file_contains "$N/conf.d/app.conf" "# access_log /var/log/nginx/conf-d.log; # disabled by isutools"
+  assert_file_contains "$N/sites-enabled/real.conf" "# access_log /var/log/nginx/real.log; # disabled by isutools"
+  refute_file_contains "$N/conf.d/isutools-log.conf" "disabled by isutools"
+  [ -L "$N/sites-enabled/isuapp.conf" ]
+  run grep -c "disabled by isutools" "$N/sites-available/isuapp.conf"
+  [ "$output" = 1 ]
+}

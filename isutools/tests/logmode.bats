@@ -42,8 +42,8 @@ dropin() { echo "$W/$1/etc/systemd/system/isuapp-node.service.d/isutools.conf"; 
   lm on
   assert_success
   [ "$(git log -1 --format=%s)" = "chore: log on" ]
-  assert_file_contains "$(dropin s1)" "NODE_OPTIONS=--require"
-  assert_file_contains "$W/s1/etc/mysql/conf.d/isutools-slowlog.cnf" "long_query_time=0"
+  assert_file_contains "$(dropin s1)" 'Environment="NODE_OPTIONS=--require '
+  assert_file_contains "$W/s1/etc/mysql/conf.d/zz-isutools-slowlog.cnf" "long_query_time=0"
 }
 
 @test "log-off does not push" {
@@ -66,4 +66,15 @@ dropin() { echo "$W/$1/etc/systemd/system/isuapp-node.service.d/isutools.conf"; 
 @test "rejects unknown mode" {
   lm maybe
   assert_failure
+}
+
+@test "log-off commits slow log cnf in mysql.conf.d" {
+  mkdir -p "$W/s1/etc/mysql/mysql.conf.d"
+  REPO_ROOT="$W" bash -c 'source isutools/lib/common.sh; source isutools/lib/render.sh; isu_load_config; render_all on'
+  git add -A && git commit -q -m "move cnf"
+  lm off
+  assert_success
+  run git show --name-only --format= HEAD
+  assert_contains "s1/etc/mysql/mysql.conf.d/zz-isutools-slowlog.cnf"
+  [ -z "$(git status --porcelain)" ]
 }
