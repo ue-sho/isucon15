@@ -13,8 +13,8 @@ tasks:
         {{printf "set -eu; cd %s; git fetch origin %s; git checkout --detach FETCH_HEAD; %s" (.APP_DIR | shellQuote) (.REV | shellQuote) .DEPLOY_COMMAND | shellQuote}}
 
   bench:
-    desc: ベンチサーバーで指定コマンドを1回実行
+    desc: ポータルAPIでベンチを1回起動し、完了後の結果を出力
     requires:
-      vars: [BENCH_HOST, BENCH_COMMAND]
+      vars: [PORTAL_TARGET_ID, PORTAL_COOKIE, PORTAL_CSRF_TOKEN]
     cmds:
-      - ssh {{.BENCH_HOST | shellQuote}} {{.BENCH_COMMAND | shellQuote}}
+      - python3 scripts/portal_bench.py

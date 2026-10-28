@@ -25,8 +25,6 @@ jobs:
       APP_HOST: ${{ vars.APP_HOST }}
       APP_DIR: ${{ vars.APP_DIR }}
       DEPLOY_COMMAND: ${{ vars.DEPLOY_COMMAND }}
-      BENCH_HOST: ${{ vars.BENCH_HOST }}
-      BENCH_COMMAND: ${{ vars.BENCH_COMMAND }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,6 +37,11 @@ jobs:
 
       - name: Benchmark
         id: bench
+        env:
+          PORTAL_URL: ${{ vars.PORTAL_URL || 'https://portal.isucon.net' }}
+          PORTAL_TARGET_ID: ${{ vars.PORTAL_TARGET_ID }}
+          PORTAL_COOKIE: ${{ secrets.PORTAL_COOKIE }}
+          PORTAL_CSRF_TOKEN: ${{ secrets.PORTAL_CSRF_TOKEN }}
         run: task bench 2>&1 | tee "$RUNNER_TEMP/benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"
 
       - name: Comment on PR
