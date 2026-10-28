@@ -66,6 +66,11 @@ bootstrap を実行する人だけ、追加で `uv tool install ansible-core`（
 
 ## 日常の流れ
 
+専用サーバで bootstrap 自体を検証する場合は、検証ブランチを push して
+`task bootstrap BRANCH=test/isutools-servers` を実行できる。
+初期状態の取り込み・push・サーバ同期・初回デプロイは指定ブランチで完結する。
+省略時は `main`。実行時のブランチは指定先と一致している必要がある。
+
 ```
 git switch -c feature/xxx
 # 修正して commit

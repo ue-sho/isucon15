@@ -8,6 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/../lib/common.sh"
 isu_load_config
 cd "$REPO_ROOT"
+export BOOTSTRAP_BRANCH="${1:-${BOOTSTRAP_BRANCH:-main}}"
+if [ "$(git symbolic-ref --quiet --short HEAD || true)" != "$BOOTSTRAP_BRANCH" ]; then
+  isu_err "bootstrap は ${BOOTSTRAP_BRANCH} ブランチで実行してください"
+  exit 1
+fi
 
 if ! command -v ansible-playbook >/dev/null 2>&1; then
   isu_err "ansible-playbook がありません。uv tool install ansible-core（または brew install ansible）してください"
@@ -24,8 +29,8 @@ ansible-galaxy collection install -r "$ISUTOOLS_DIR/ansible/requirements.yml" >/
 isu_info "playbook を実行"
 (cd "$ISUTOOLS_DIR/ansible" && ansible-playbook bootstrap.yml)
 
-isu_info "初回デプロイ（main）"
-bash "$SCRIPT_DIR/deploy.sh" main
+isu_info "初回デプロイ（${BOOTSTRAP_BRANCH}）"
+bash "$SCRIPT_DIR/deploy.sh" "$BOOTSTRAP_BRANCH"
 
 isu_info "pprotein の targets を登録"
 bash "$SCRIPT_DIR/pprotein-targets.sh" single
