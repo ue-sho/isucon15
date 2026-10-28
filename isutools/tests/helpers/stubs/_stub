@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# テスト用のコマンド stub。呼び出しを偽ホストの calls.log に記録する。
+#   - $FAKE_HOSTS/$FAKE_HOST/fail-<cmd> があれば exit 1
+#   - systemctl is-enabled / is-active X は $FAKE_HOSTS/$FAKE_HOST/enabled に X があれば 0
+set -euo pipefail
+
+cmd="$(basename "$0")"
+hostdir="$FAKE_HOSTS/${FAKE_HOST:-local}"
+mkdir -p "$hostdir"
+echo "$cmd $*" >>"$hostdir/calls.log"
+
+if [ -e "$hostdir/fail-$cmd" ]; then
+  echo "$cmd: injected failure" >&2
+  exit 1
+fi
+
+if [ "$cmd" = systemctl ]; then
+  case "${1:-}" in
+    is-enabled | is-active)
+      grep -qxF -- "${2:-}" "$hostdir/enabled" 2>/dev/null
+      exit $?
+      ;;
+  esac
+fi
+exit 0

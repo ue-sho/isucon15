@@ -1,0 +1,8 @@
+version: '3'
+
+tasks:
+  test:
+    desc: isutools のテストと lint（開発者向け）
+    cmds:
+      - bats isutools/tests
+      - find isutools -name '*.sh' -not -path '*/node_modules/*' -print0 | xargs -0 shellcheck -x isutools/tests/helpers/fake-ssh isutools/tests/helpers/stubs/_stub
