@@ -2,7 +2,13 @@
 // isutools: NODE_OPTIONS=--require で読み込む pprof エンドポイント。
 //   GET /debug/pprof/profile?seconds=N → @datadog/pprof の time profile（gzip 済み pprof 形式）
 // アプリを絶対に落とさないこと: 失敗はすべて console.error に出して諦める。
+
+// npm / npx / pnpm / yarn / tsx / ts-node / nodemon は NODE_OPTIONS を引き継いだ子プロセスでアプリを動かす。
+// ランチャーがポートを取ると本物のアプリを計測できないため、ランチャーでは待ち受けない。
+const LAUNCHER = /(?:^|[\\/])(?:npm-cli|npx-cli|pnpm|yarn)\.c?js$|[\\/](?:tsx|ts-node|nodemon|pnpm|yarn)[\\/]/;
+
 try {
+  if (LAUNCHER.test(process.argv[1] || '')) throw Object.assign(new Error('launcher'), { skip: true });
   const http = require('node:http');
   const pprof = require('@datadog/pprof');
   const port = Number(process.env.ISUTOOLS_PROFILER_PORT || 6060);
@@ -29,5 +35,5 @@ try {
   server.listen(port);
   server.unref();
 } catch (e) {
-  console.error('[isutools profiler] disabled:', e && e.message);
+  if (!(e && e.skip)) console.error('[isutools profiler] disabled:', e && e.message);
 }

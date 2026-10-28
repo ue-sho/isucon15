@@ -78,3 +78,26 @@ test('does not keep process alive', async () => {
   assert.ok(Date.now() - started < 2000, 'process should exit promptly');
   assert.strictEqual(app.exitCode, 0);
 });
+
+// npm / npx / tsx などのランチャーは NODE_OPTIONS を子プロセスに引き継ぐ。
+// ランチャー側がポートを取ると本物のアプリを計測できないため、ランチャーでは待ち受けない。
+for (const launcher of [
+  ['node_modules', 'npm', 'bin', 'npm-cli.js'],
+  ['node_modules', 'tsx', 'dist', 'cli.mjs'],
+]) {
+  test(`does not listen inside launcher ${launcher.join('/')}`, async (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'isutools-launcher-'));
+    const script = path.join(dir, ...launcher);
+    fs.mkdirSync(path.dirname(script), { recursive: true });
+    fs.writeFileSync(script, 'setInterval(() => {}, 1000)\n');
+    const port = nextPort++;
+    const child = spawn(process.execPath, ['--require', PROFILER, script], {
+      env: { ...process.env, ISUTOOLS_PROFILER_PORT: String(port) },
+      stdio: 'ignore',
+    });
+    t.after(() => child.kill());
+    await sleep(1500);
+    assert.ok(alive(child));
+    await assert.rejects(fetch(`http://127.0.0.1:${port}/`));
+  });
+}
