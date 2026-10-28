@@ -16,11 +16,12 @@ mkdir -p "$STATE_DIR"
 step=start
 build_sec=0
 on_exit() {
-  local rc=$?
+  local rc=$? commit
+  commit="$(git -C "$REPO_ROOT" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)"
   if [ $rc -eq 0 ]; then
-    echo "ISUTOOLS_RESULT status=ok build=$build_sec step=done"
+    echo "ISUTOOLS_RESULT status=ok build=$build_sec step=done commit=$commit"
   else
-    echo "ISUTOOLS_RESULT status=ng build=$build_sec step=$step"
+    echo "ISUTOOLS_RESULT status=ng build=$build_sec step=$step commit=$commit"
   fi
 }
 trap on_exit EXIT
@@ -117,6 +118,6 @@ step=record
 {
   echo "deployer=${DEPLOYER:-unknown}"
   echo "branch=${DEPLOY_BRANCH:-unknown}"
-  echo "commit=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  echo "commit=$(git -C "$REPO_ROOT" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)"
   echo "at=$(date +%s)"
 } >"$STATE_DIR/last-deploy"
