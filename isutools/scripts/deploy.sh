@@ -53,7 +53,7 @@ lock_all "$deployer" $HOSTS
 # shellcheck disable=SC2086
 trap 'unlock_all $HOSTS' EXIT
 
-echo "▶ deploying to $(echo "$HOSTS" | sed 's/ /, /g') ..."
+echo "▶ deploying to ${HOSTS// /, } ..."
 logdir="$(mktemp -d)"
 qbranch="$(printf '%q' "$branch")"
 qdeployer="$(printf '%q' "$deployer")"
