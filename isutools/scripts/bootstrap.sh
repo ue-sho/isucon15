@@ -32,6 +32,12 @@ isu_info "playbook を実行"
 isu_info "初回デプロイ（${BOOTSTRAP_BRANCH}）"
 bash "$SCRIPT_DIR/deploy.sh" "$BOOTSTRAP_BRANCH"
 
+isu_info "計測サービスを初回起動"
+for h in $HOSTS; do
+  isu_ssh "$h" 'sudo systemctl enable --now pprotein-agent.service'
+done
+isu_ssh "$PPROTEIN_HOST" 'sudo systemctl enable --now pprotein.service'
+
 isu_info "pprotein の targets を登録"
 bash "$SCRIPT_DIR/pprotein-targets.sh" single
 

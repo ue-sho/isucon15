@@ -17,7 +17,7 @@ setup() {
     cd "$W"
     git init -q
     git remote add origin "$TMP/origin.git"
-    REPO_ROOT="$W" bash -c 'source isutools/lib/common.sh; source isutools/lib/render.sh; isu_load_config; render_all on'
+    REPO_ROOT="$W" bash -c 'source isutools/lib/common.sh; source isutools/lib/render.sh; isu_load_config; render_all'
     git add -A && git commit -q -m "initial" && git push -q origin main
   )
   for h in s1 s2 s3; do

@@ -48,27 +48,6 @@
         key: "{{ lookup('ansible.builtin.pipe', 'ssh-keyscan -t ed25519 github.com 2>/dev/null') }}"
         path: /home/isucon/.ssh/known_hosts
 
-    - name: Switch the app to APP_SERVICE (disable other language implementations)
-      vars:
-        app_service: "{{ lookup('env', 'APP_SERVICE') }}"
-      ansible.builtin.shell: |
-        set -eo pipefail
-        prefix="${APP_SERVICE%-*}"
-        for u in $(systemctl list-unit-files "${prefix}-*.service" --no-legend | awk '{print $1}'); do
-          # matcher や payment_mock などの補助サービスは停止しない。
-          case "${u#"$prefix"-}" in
-            go.service|node.service|perl.service|php.service|python.service|ruby.service|rust.service) ;;
-            *) continue ;;
-          esac
-          [ "$u" = "$APP_SERVICE" ] || systemctl disable --now "$u"
-        done
-        systemctl enable --now "$APP_SERVICE"
-      args:
-        executable: /bin/bash
-      environment:
-        APP_SERVICE: "{{ app_service }}"
-      changed_when: true
-
     - name: Back up original /etc/nginx and /etc/mysql (first run only)
       ansible.builtin.shell: |
         set -e

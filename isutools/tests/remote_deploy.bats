@@ -23,12 +23,12 @@ setup() {
   echo "access" >"$LOGS/nginx/access.log"
   echo "slow" >"$LOGS/mysql/slow.log"
   printf 'mysql\nnginx\nisuapp-node.service\n' >"$H/enabled"
-  mode on
+  render_initial
 }
 
 # render を偽ホストのリポジトリ上で実行
-mode() {
-  REPO_ROOT="$R" bash -c "source \"$R/isutools/lib/common.sh\"; source \"$R/isutools/lib/render.sh\"; isu_load_config; ${2:-} render_all $1"
+render_initial() {
+  REPO_ROOT="$R" bash -c "source \"$R/isutools/lib/common.sh\"; source \"$R/isutools/lib/render.sh\"; isu_load_config; render_all"
 }
 
 deploy() {
@@ -76,26 +76,22 @@ calls() { cat "$H/calls.log" 2>/dev/null || true; }
   refute_contains "systemctl restart mysql"
 }
 
-@test "enables agent, and pprotein only on PPROTEIN_HOST" {
-  deploy
-  run calls
-  assert_contains "systemctl enable --now pprotein-agent"
-  refute_contains "systemctl enable --now pprotein.service"
-  sed 's/^PPROTEIN_HOST=.*/PPROTEIN_HOST=s1/' "$R/isutools/config.env" >"$TMP/c" && cp "$TMP/c" "$R/isutools/config.env"
-  mode on
-  : >"$H/calls.log"
-  deploy
-  run calls
-  assert_contains "systemctl enable --now pprotein.service"
-}
-
-@test "disables pprotein-agent when PPROTEIN_ENABLED=0" {
-  mode off
+@test "respects manually disabled profiling services" {
   deploy
   assert_success
   run calls
-  assert_contains "systemctl disable --now pprotein-agent"
-  refute_contains "enable --now pprotein-agent"
+  refute_contains "systemctl enable"
+  refute_contains "systemctl disable"
+  refute_contains "systemctl restart pprotein"
+  printf 'pprotein-agent.service\npprotein.service\n' >>"$H/enabled"
+  : >"$H/calls.log"
+  deploy
+  assert_success
+  run calls
+  assert_contains "systemctl restart pprotein-agent.service"
+  assert_contains "systemctl restart pprotein.service"
+  refute_contains "systemctl enable"
+  refute_contains "systemctl disable"
 }
 
 @test "truncates logs" {

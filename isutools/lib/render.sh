@@ -62,14 +62,8 @@ slowlog_cnf_path() {
   echo "$1/etc/mysql/conf.d/zz-isutools-slowlog.cnf"
 }
 
-# render_all <on|off>
+# render_all — bootstrap 用の初期計測設定を生成する
 render_all() {
-  local mode="$1"
-  case "$mode" in
-    on | off) ;;
-    *) isu_err "mode は on か off です: $mode"; return 1 ;;
-  esac
-
   local pprotein_ip h
   pprotein_ip="$(host_ip "$PPROTEIN_HOST")"
   if [ -z "$pprotein_ip" ]; then
@@ -84,20 +78,13 @@ render_all() {
   done
 
   local access_log slowlog app_env
-  if [ "$mode" = on ]; then
-    access_log="access_log $NGINX_LOG isutools_ltsv;"
-    slowlog="slow_query_log=1
+  access_log="access_log $NGINX_LOG isutools_ltsv;"
+  slowlog="slow_query_log=1
 slow_query_log_file=$SLOW_LOG
 long_query_time=0"
-    app_env="Environment=PPROTEIN_ENABLED=1
+  app_env="Environment=PPROTEIN_ENABLED=1
 Environment=PPROTEIN_URL=http://$pprotein_ip:9000
 Environment=\"NODE_OPTIONS=--require $SERVER_HOME/isutools/profiler/profiler.cjs\""
-  else
-    access_log="access_log off;"
-    slowlog="slow_query_log=0"
-    app_env="Environment=PPROTEIN_ENABLED=0
-Environment=PPROTEIN_URL=http://$pprotein_ip:9000"
-  fi
 
   for h in $HOSTS; do
     local etc="$REPO_ROOT/$h/etc"
@@ -123,17 +110,4 @@ Environment=PPROTEIN_URL=http://$pprotein_ip:9000"
   _targets_json single "$(echo $HOSTS | cut -d' ' -f1)" >"$ISUTOOLS_DIR/pprotein/targets.single.json"
   # shellcheck disable=SC2086
   _targets_json split $HOSTS >"$ISUTOOLS_DIR/pprotein/targets.split.json"
-}
-
-# current_mode — 先頭ホストの drop-in から on|off を返す
-current_mode() {
-  local first f
-  # shellcheck disable=SC2086
-  first="$(echo $HOSTS | cut -d' ' -f1)"
-  f="$REPO_ROOT/$first/etc/systemd/system/$APP_SERVICE.d/isutools.conf"
-  if [ -f "$f" ] && grep -q '^Environment=PPROTEIN_ENABLED=1$' "$f"; then
-    echo on
-  else
-    echo off
-  fi
 }

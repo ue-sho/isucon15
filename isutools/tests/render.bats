@@ -16,7 +16,7 @@ render() {
 dropin() { echo "$REPO_ROOT/$1/etc/systemd/system/isuapp-node.service.d/isutools.conf"; }
 
 @test "render on writes slow log with long_query_time=0 for all hosts" {
-  render "render_all on"
+  render "render_all"
   assert_success
   for h in s1 s2 s3; do
     f="$REPO_ROOT/$h/etc/mysql/conf.d/zz-isutools-slowlog.cnf"
@@ -32,42 +32,27 @@ dropin() { echo "$REPO_ROOT/$1/etc/systemd/system/isuapp-node.service.d/isutools
   done
 }
 
-@test "render off disables access_log and slow log and drops NODE_OPTIONS" {
-  render "render_all on && render_all off"
-  assert_success
-  for h in s1 s2 s3; do
-    assert_file_contains "$REPO_ROOT/$h/etc/nginx/conf.d/isutools-log.conf" "access_log off;"
-    assert_file_contains "$REPO_ROOT/$h/etc/nginx/conf.d/isutools-log.conf" "log_format isutools_ltsv"
-    assert_file_contains "$REPO_ROOT/$h/etc/mysql/conf.d/zz-isutools-slowlog.cnf" "slow_query_log=0"
-    refute_file_contains "$REPO_ROOT/$h/etc/mysql/conf.d/zz-isutools-slowlog.cnf" "long_query_time=0"
-    assert_file_contains "$(dropin "$h")" "PPROTEIN_ENABLED=0"
-    refute_file_contains "$(dropin "$h")" "NODE_OPTIONS"
-  done
-}
-
 @test "pprotein.service is rendered only on PPROTEIN_HOST" {
-  render "render_all on"
+  render "render_all"
   assert_success
   [ -f "$REPO_ROOT/s3/etc/systemd/system/pprotein.service" ]
   [ ! -e "$REPO_ROOT/s1/etc/systemd/system/pprotein.service" ]
   [ ! -e "$REPO_ROOT/s2/etc/systemd/system/pprotein.service" ]
 
-  render "PPROTEIN_HOST=s2 render_all on"
+  render "PPROTEIN_HOST=s2 render_all"
   assert_success
   [ -f "$REPO_ROOT/s2/etc/systemd/system/pprotein.service" ]
   [ ! -e "$REPO_ROOT/s3/etc/systemd/system/pprotein.service" ]
 }
 
 @test "PPROTEIN_URL uses private IP of PPROTEIN_HOST" {
-  render "render_all on"
+  render "render_all"
   assert_success
-  assert_file_contains "$(dropin s1)" "PPROTEIN_URL=http://10.0.0.3:9000"
-  render "render_all off"
   assert_file_contains "$(dropin s1)" "PPROTEIN_URL=http://10.0.0.3:9000"
 }
 
 @test "targets json: single has 3, split has 9, all valid JSON" {
-  render "render_all on"
+  render "render_all"
   assert_success
   run jq length "$REPO_ROOT/isutools/pprotein/targets.single.json"
   [ "$output" = 3 ]
@@ -83,14 +68,14 @@ dropin() { echo "$REPO_ROOT/$1/etc/systemd/system/isuapp-node.service.d/isutools
 
 @test "render fails when IP of PPROTEIN_HOST is unknown" {
   rm "$REPO_ROOT/isutools/hosts.env"
-  render "render_all on"
+  render "render_all"
   assert_failure
   assert_contains "hosts.env"
 }
 
 @test "slow log cnf goes to mysql.conf.d when present (read after conf.d)" {
   mkdir -p "$REPO_ROOT/s1/etc/mysql/mysql.conf.d" "$REPO_ROOT/s2/etc/mysql/mariadb.conf.d"
-  render "render_all on"
+  render "render_all"
   assert_success
   assert_file_contains "$REPO_ROOT/s1/etc/mysql/mysql.conf.d/zz-isutools-slowlog.cnf" "long_query_time=0"
   assert_file_contains "$REPO_ROOT/s2/etc/mysql/mariadb.conf.d/zz-isutools-slowlog.cnf" "long_query_time=0"
