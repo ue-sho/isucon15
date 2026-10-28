@@ -1,0 +1,131 @@
+#!/usr/bin/env bats
+
+setup() {
+  load helpers/setup
+  common_setup
+  H="$FAKE_HOSTS/s1"
+  R="$H/home/isucon"
+  make_work_repo "$R"
+  export LOGS="$TMP/logs"
+  mkdir -p "$LOGS/nginx" "$LOGS/mysql"
+  sed -e 's/^APP_SERVICE=.*/APP_SERVICE=isuapp-node.service/' \
+    -e "s|^NGINX_LOG=.*|NGINX_LOG=$LOGS/nginx/access.log|" \
+    -e "s|^SLOW_LOG=.*|SLOW_LOG=$LOGS/mysql/slow.log|" \
+    "$SRC_ROOT/isutools/config.env" >"$R/isutools/config.env"
+  printf 'S1_IP=10.0.0.1\nS2_IP=10.0.0.2\nS3_IP=10.0.0.3\n' >"$R/isutools/hosts.env"
+  mkdir -p "$R/webapp/nodejs" "$R/s1/etc/mysql" "$R/s1/etc/nginx"
+  echo '{"lockfileVersion":3}' >"$R/webapp/nodejs/package-lock.json"
+  mkdir -p "$R/isutools/profiler"
+  echo '{"lockfileVersion":3,"name":"profiler"}' >"$R/isutools/profiler/package-lock.json"
+  echo "[client]" >"$R/s1/etc/mysql/debian.cnf"
+  echo "[mysqld]" >"$R/s1/etc/mysql/my.cnf"
+  echo "events {}" >"$R/s1/etc/nginx/nginx.conf"
+  echo "access" >"$LOGS/nginx/access.log"
+  echo "slow" >"$LOGS/mysql/slow.log"
+  printf 'mysql\nnginx\nisuapp-node.service\n' >"$H/enabled"
+  mode on
+}
+
+# render を偽ホストのリポジトリ上で実行
+mode() {
+  REPO_ROOT="$R" bash -c "source \"$R/isutools/lib/common.sh\"; source \"$R/isutools/lib/render.sh\"; isu_load_config; ${2:-} render_all $1"
+}
+
+deploy() {
+  run "$ISUTOOLS_SSH" "${1:-s1}" "DEPLOYER='Alice A' DEPLOY_BRANCH=feature/x bash isutools/scripts/remote-deploy.sh ${1:-s1}"
+}
+
+calls() { cat "$H/calls.log" 2>/dev/null || true; }
+
+@test "first deploy runs npm ci and writes record" {
+  deploy
+  assert_success
+  assert_contains "ISUTOOLS_RESULT status=ok"
+  run calls
+  assert_contains "npm ci"
+  assert_file_contains "$R/.isutools/last-deploy" "deployer=Alice A"
+  assert_file_contains "$R/.isutools/last-deploy" "branch=feature/x"
+}
+
+@test "second deploy skips npm ci when lock unchanged" {
+  deploy
+  deploy
+  assert_success
+  run grep -c "^npm ci" "$H/calls.log"
+  # アプリと profiler の lock それぞれ1回ずつ
+  [ "$output" = 2 ]
+}
+
+@test "copies host etc but never debian.cnf" {
+  deploy
+  assert_success
+  [ -f "$H/etc/mysql/my.cnf" ]
+  [ -f "$H/etc/nginx/conf.d/isutools-log.conf" ]
+  [ -f "$H/etc/systemd/system/isuapp-node.service.d/isutools.conf" ]
+  [ ! -e "$H/etc/mysql/debian.cnf" ]
+}
+
+@test "restarts only enabled services" {
+  printf 'nginx\nisuapp-node.service\n' >"$H/enabled"
+  deploy
+  assert_success
+  run calls
+  assert_contains "systemctl daemon-reload"
+  assert_contains "systemctl restart nginx"
+  assert_contains "systemctl restart isuapp-node.service"
+  refute_contains "systemctl restart mysql"
+}
+
+@test "enables agent, and pprotein only on PPROTEIN_HOST" {
+  deploy
+  run calls
+  assert_contains "systemctl enable --now pprotein-agent"
+  refute_contains "systemctl enable --now pprotein.service"
+  sed 's/^PPROTEIN_HOST=.*/PPROTEIN_HOST=s1/' "$R/isutools/config.env" >"$TMP/c" && cp "$TMP/c" "$R/isutools/config.env"
+  mode on
+  : >"$H/calls.log"
+  deploy
+  run calls
+  assert_contains "systemctl enable --now pprotein.service"
+}
+
+@test "disables pprotein-agent when PPROTEIN_ENABLED=0" {
+  mode off
+  deploy
+  assert_success
+  run calls
+  assert_contains "systemctl disable --now pprotein-agent"
+  refute_contains "enable --now pprotein-agent"
+}
+
+@test "truncates logs" {
+  deploy
+  assert_success
+  [ ! -s "$LOGS/nginx/access.log" ]
+  [ ! -s "$LOGS/mysql/slow.log" ]
+}
+
+@test "works without logs, env files or record (first boot)" {
+  rm -f "$LOGS/nginx/access.log" "$LOGS/mysql/slow.log"
+  deploy
+  assert_success
+  assert_contains "status=ok"
+}
+
+@test "copies ISUCON env files from host dir" {
+  mkdir -p "$R/s1/home/isucon"
+  echo "ISUCON_DB_HOST=127.0.0.1" >"$R/s1/home/isucon/env.sh"
+  deploy
+  assert_success
+  assert_file_contains "$R/env.sh" "ISUCON_DB_HOST=127.0.0.1"
+}
+
+@test "stops with status=ng step=nginx-test when nginx -t fails" {
+  touch "$H/fail-nginx"
+  deploy
+  assert_failure
+  assert_contains "ISUTOOLS_RESULT status=ng"
+  assert_contains "step=nginx-test"
+  run calls
+  refute_contains "systemctl restart"
+}
