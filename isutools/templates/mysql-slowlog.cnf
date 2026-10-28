@@ -1,0 +1,3 @@
+# isutools 管理ファイル（task log-on / log-off で再生成される。手で編集しない）
+[mysqld]
+@@SLOWLOG_SETTINGS@@
