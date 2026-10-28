@@ -26,6 +26,29 @@ h() {
   run bash -c "source \"$SRC_ROOT/isutools/lib/common.sh\"; source \"$SRC_ROOT/isutools/lib/bootstrap_helpers.sh\"; $*"
 }
 
+@test "bootstrap switches languages without stopping auxiliary services" {
+  mkdir -p "$TMP/bin"
+  cat >"$TMP/bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = list-unit-files ]; then
+  printf '%s enabled\n' isuride-node.service isuride-go.service isuride-matcher.service isuride-payment_mock.service
+else
+  echo "$*" >>"$TMP/service-calls"
+fi
+EOF
+  chmod +x "$TMP/bin/systemctl"
+  # 実際に Ansible が使うシェルを実行する。
+  awk '/        set -eo pipefail/ { capture=1 } capture && /^      args:/ { exit } capture { print substr($0, 9) }' \
+    "$SRC_ROOT/isutools/ansible/bootstrap.yml" >"$TMP/switch-app.sh"
+  run env PATH="$TMP/bin:$PATH" APP_SERVICE=isuride-node.service bash "$TMP/switch-app.sh"
+  assert_success
+  run cat "$TMP/service-calls"
+  assert_contains "disable --now isuride-go.service"
+  assert_contains "enable --now isuride-node.service"
+  refute_contains "matcher"
+  refute_contains "payment_mock"
+}
+
 @test "disable_original_access_log comments out access_log and is idempotent" {
   h "disable_original_access_log '$N' && disable_original_access_log '$N'"
   assert_success

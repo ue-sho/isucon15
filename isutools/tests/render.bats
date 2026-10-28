@@ -28,6 +28,7 @@ dropin() { echo "$REPO_ROOT/$1/etc/systemd/system/isuapp-node.service.d/isutools
     assert_file_contains "$(dropin "$h")" "PPROTEIN_ENABLED=1"
     assert_file_contains "$(dropin "$h")" 'Environment="NODE_OPTIONS=--require /home/isucon/isutools/profiler/profiler.cjs"'
     assert_file_contains "$REPO_ROOT/$h/etc/systemd/system/pprotein-agent.service" "PPROTEIN_HTTPLOG=/var/log/nginx/access.log"
+    assert_file_contains "$REPO_ROOT/$h/etc/systemd/system/pprotein-agent.service" "SupplementaryGroups=adm mysql"
   done
 }
 

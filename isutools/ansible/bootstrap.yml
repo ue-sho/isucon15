@@ -55,6 +55,11 @@
         set -eo pipefail
         prefix="${APP_SERVICE%-*}"
         for u in $(systemctl list-unit-files "${prefix}-*.service" --no-legend | awk '{print $1}'); do
+          # matcher や payment_mock などの補助サービスは停止しない。
+          case "${u#"$prefix"-}" in
+            go.service|node.service|perl.service|php.service|python.service|ruby.service|rust.service) ;;
+            *) continue ;;
+          esac
           [ "$u" = "$APP_SERVICE" ] || systemctl disable --now "$u"
         done
         systemctl enable --now "$APP_SERVICE"
