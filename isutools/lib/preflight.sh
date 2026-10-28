@@ -33,7 +33,7 @@ preflight_branch() {
   behind="${counts##*[[:space:]]}"
 
   if [ "$ahead" -gt 0 ] && [ "$behind" -gt 0 ]; then
-    isu_err "ローカルと origin が分岐しています（ローカル +$ahead / origin +$behind）。pull して解消してください"
+    isu_err "ローカルと origin が分岐しています（ローカル +${ahead} / origin +${behind}）。pull して解消してください"
     return 1
   fi
   if [ "$ahead" -gt 0 ]; then
