@@ -1,6 +1,11 @@
 version: '3'
 
 tasks:
+  bootstrap:
+    desc: 競技開始時に1人が1回だけ実行（Ansible でセットアップ → 初回デプロイ → pprotein 設定）
+    cmds:
+      - bash isutools/scripts/bootstrap.sh
+
   deploy:
     desc: 手元の現在ブランチ（BRANCH=xxx で指定可）を3台すべてにデプロイ
     cmds:
