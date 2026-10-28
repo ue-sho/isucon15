@@ -45,16 +45,10 @@ origin_files() { git -C "$TMP/origin.git" ls-tree -r --name-only main; }
   assert_contains "isutools/hosts.env"
   assert_contains "isutools/pprotein/targets.single.json"
   refute_contains "node_modules"
+  refute_contains "debian.cnf"
   assert_file_contains "$W/isutools/hosts.env" "S3_IP=10.0.0.3"
   assert_file_contains "$W/s1/etc/nginx/nginx.conf" "# access_log /var/log/nginx/access.log; # disabled by isutools"
   assert_file_contains "$W/s1/etc/systemd/system/isuapp-node.service.d/isutools.conf" "PPROTEIN_URL=http://10.0.0.3:9000"
-}
-
-@test "never stages debian.cnf" {
-  bl
-  assert_success
-  run origin_files
-  refute_contains "debian.cnf"
 }
 
 @test "gitignores large files and env files" {

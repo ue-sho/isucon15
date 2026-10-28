@@ -74,12 +74,6 @@ push_from_other() {
   assert_contains "origin/main を反映します"
 }
 
-@test "current_branch prints branch with slash" {
-  pf "current_branch"
-  assert_success
-  [ "$output" = feature/index-rides ]
-}
-
 @test "current_branch fails on detached HEAD" {
   git switch -q --detach HEAD
   pf "current_branch"

@@ -46,27 +46,6 @@ h() {
   assert_contains "conf.d"
 }
 
-@test "detect_env_files handles -prefix and multiple lines" {
-  cat >"$TMP/app.service" <<'EOF'
-[Service]
-EnvironmentFile=/home/isucon/env.sh
-EnvironmentFile=-/home/isucon/env.local
-ExecStart=/usr/bin/node app.js
-EOF
-  h "detect_env_files '$TMP/app.service'"
-  assert_success
-  [ "${lines[0]}" = /home/isucon/env.sh ]
-  [ "${lines[1]}" = /home/isucon/env.local ]
-  [ "${#lines[@]}" -eq 2 ]
-}
-
-@test "detect_env_files prints nothing when absent" {
-  printf '[Service]\nExecStart=/bin/true\n' >"$TMP/app.service"
-  h "detect_env_files '$TMP/app.service'"
-  assert_success
-  [ -z "$output" ]
-}
-
 @test "find_large_files lists files over threshold" {
   mkdir -p "$TMP/w/sql" "$TMP/w/node_modules"
   truncate -s 51M "$TMP/w/sql/big.sql"

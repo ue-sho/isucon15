@@ -8,7 +8,7 @@ ISUCON15 用のセットアップ・デプロイ・計測ツール。手元か�
 
 ## 事前準備（全員）
 
-1. `brew install go-task`
+1. `task` をインストール（macOS: `brew install go-task`。Linux でも Go Task の `task` を使用）
 2. `~/.ssh/config` に3台を書く。**Host 名は全員 `s1` `s2` `s3` にそろえ、`ForwardAgent yes` を必ず入れる**
    （サーバ上の git が手元の鍵で GitHub に接続するため。サーバに鍵は置かない）
 
@@ -27,7 +27,8 @@ ISUCON15 用のセットアップ・デプロイ・計測ツール。手元か�
        ForwardAgent yes
    ```
 
-3. GitHub 用の鍵を agent に載せる: `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`
+3. GitHub 用の鍵を agent に載せる。Linux は `eval "$(ssh-agent -s)"` → `ssh-add ~/.ssh/id_ed25519`、
+   macOS は `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`
 4. （任意）Discord に通知する場合、リポジトリ直下に `.env.isutools` を作る（コミットされない）
 
    ```
@@ -35,6 +36,11 @@ ISUCON15 用のセットアップ・デプロイ・計測ツール。手元か�
    ```
 
 bootstrap を実行する人だけ、追加で `uv tool install ansible-core`（または `brew install ansible`）。
+
+サーバ間のプライベート IP 通信もセキュリティグループで許可しておく。
+計測にはアプリ → pprotein ホストの TCP 9000、pprotein ホスト → 計測対象の TCP 19000（agent）と
+6060（Node profiler）が必要。競技用の3台で共通のセキュリティグループを使う場合、
+ソースをそのグループ自身とした全通信の許可でもよい。DB 分割時の3306番などにも対応できる。
 
 ## 競技開始時（1人だけ）
 
@@ -114,8 +120,13 @@ task deploy          # 現在ブランチを3台に反映（結果は Discord �
 - **`s1 から pprotein に届きません`**: s1 → s3 の 9000 番ポートが開いているか確認
 - **サーバ分割**: DB を移すなどしたら、該当ホストの `sN/etc` と `config.env` を編集 → `task deploy`、
   計測は `task pprotein:targets -- split`
+- **`unsupported locale setting`**: `LC_ALL=C.UTF-8 LANG=C.UTF-8 task bootstrap` で実行する
+  （検証ブランチの場合は `BRANCH=...` も付ける）
+- **デプロイ後の接続確認だけ失敗した場合**: サーバ間通信を許可した後、
+  `task pprotein:targets -- single` で targets 登録と接続確認を再実行する
 
 ## 開発者向け
 
 `task test`（bats-core / shellcheck / Node 22+ が必要）。テストは偽ホスト（ローカルのディレクトリ）と
 偽 ssh（`isutools/tests/helpers/fake-ssh`）で動く。手元のスクリプトは macOS の bash 3.2 でも動くこと。
+Ubuntu / Debian では `sudo apt install -y bats shellcheck jq rsync` でテスト用ツールをインストールできる。

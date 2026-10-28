@@ -9,5 +9,5 @@ if LC_ALL=C grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' isutools/lib/*.sh isutools
   exit 1
 fi
 
-find isutools -name '*.sh' -not -path '*/node_modules/*' -print0 |
+find isutools/lib isutools/scripts isutools/tests -name '*.sh' -print0 |
   xargs -0 shellcheck -x isutools/tests/helpers/fake-ssh isutools/tests/helpers/stubs/_stub

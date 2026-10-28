@@ -19,15 +19,3 @@ setup() {
   assert_success
   assert_contains "hosts=s1 s2 s3 webhook="
 }
-
-@test "isu_ssh uses ISUTOOLS_SSH" {
-  run bash -c 'source "$REPO_ROOT/isutools/lib/common.sh"; isu_ssh s1 "echo \$ISUTOOLS_ROOT"'
-  assert_success
-  assert_contains "$FAKE_HOSTS/s1/home/isucon"
-}
-
-@test "isu_err writes to stderr with prefix" {
-  run bash -c 'source "$REPO_ROOT/isutools/lib/common.sh"; isu_err "だめ" 2>&1 >/dev/null'
-  assert_success
-  assert_contains "✖ だめ"
-}

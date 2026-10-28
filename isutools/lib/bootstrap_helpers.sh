@@ -31,11 +31,6 @@ disable_original_access_log() {
   done
 }
 
-# detect_env_files <unit_file> — EnvironmentFile= の値を1行ずつ出力する
-detect_env_files() {
-  sed -n 's/^[[:space:]]*EnvironmentFile=-\{0,1\}//p' "$1"
-}
-
 # find_large_files <dir> <mb> — 閾値を超えるファイルを <dir> からの相対パスで出力する
 find_large_files() {
   local dir="$1" mb="$2"

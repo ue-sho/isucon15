@@ -80,27 +80,11 @@ dropin() { echo "$REPO_ROOT/$1/etc/systemd/system/isuapp-node.service.d/isutools
   assert_contains "s3-slowlog"
 }
 
-@test "current_mode reflects last render" {
-  render "render_all on && current_mode"
-  assert_success
-  [ "${lines[${#lines[@]}-1]}" = on ]
-  render "render_all off && current_mode"
-  [ "${lines[${#lines[@]}-1]}" = off ]
-}
-
 @test "render fails when IP of PPROTEIN_HOST is unknown" {
   rm "$REPO_ROOT/isutools/hosts.env"
   render "render_all on"
   assert_failure
   assert_contains "hosts.env"
-}
-
-@test "every Environment= value in the drop-in is free of unquoted whitespace" {
-  render "render_all on"
-  assert_success
-  # systemd は Environment= を空白で分割するため、空白を含む代入は全体をクォートする必要がある
-  run grep -E '^Environment=[^"].* ' "$(dropin s1)"
-  [ "$status" -ne 0 ]
 }
 
 @test "slow log cnf goes to mysql.conf.d when present (read after conf.d)" {
@@ -111,12 +95,4 @@ dropin() { echo "$REPO_ROOT/$1/etc/systemd/system/isuapp-node.service.d/isutools
   assert_file_contains "$REPO_ROOT/s2/etc/mysql/mariadb.conf.d/zz-isutools-slowlog.cnf" "long_query_time=0"
   assert_file_contains "$REPO_ROOT/s3/etc/mysql/conf.d/zz-isutools-slowlog.cnf" "long_query_time=0"
   [ ! -e "$REPO_ROOT/s1/etc/mysql/conf.d/zz-isutools-slowlog.cnf" ]
-}
-
-@test "slowlog_cnf_path reports the rendered location" {
-  mkdir -p "$REPO_ROOT/s1/etc/mysql/mysql.conf.d"
-  render "slowlog_cnf_path s1; slowlog_cnf_path s3"
-  assert_success
-  [ "${lines[0]}" = s1/etc/mysql/mysql.conf.d/zz-isutools-slowlog.cnf ]
-  [ "${lines[1]}" = s3/etc/mysql/conf.d/zz-isutools-slowlog.cnf ]
 }

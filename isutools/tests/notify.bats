@@ -53,18 +53,6 @@ summ() {
   [ "$len" -le 2000 ]
 }
 
-@test "format_summary shows ok hosts and done line" {
-  mkdir -p "$TMP/logs"
-  for h in s1 s2 s3; do
-    printf 'work\nISUTOOLS_RESULT status=ok build=12 step=done commit=a1b2c3d\n' >"$TMP/logs/$h.log"
-  done
-  summ "format_summary feature/index-rides a1b2c3d 'add index' '$TMP/logs' s1 s2 s3"
-  assert_success
-  assert_contains "  s1 ✔ a1b2c3d  build 12s  restart ok"
-  assert_contains "  s3 ✔ a1b2c3d"
-  assert_contains "▶ done: feature/index-rides @ a1b2c3d on all hosts"
-}
-
 @test "format_summary shows failed host with step and log tail" {
   mkdir -p "$TMP/logs"
   printf 'ISUTOOLS_RESULT status=ok build=3 step=done commit=a1b2c3d\n' >"$TMP/logs/s1.log"

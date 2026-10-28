@@ -30,8 +30,7 @@ common_setup() {
 make_work_repo() {
   local dir="$1"
   mkdir -p "$dir"
-  cp -R "$SRC_ROOT/isutools" "$dir/"
-  rm -rf "$dir/isutools/tests" "$dir/isutools/profiler/node_modules"
+  rsync -a --exclude=.bootstrap --exclude=node_modules --exclude=tests "$SRC_ROOT/isutools/" "$dir/isutools/"
   cp "$SRC_ROOT/.gitignore" "$dir/" 2>/dev/null || true
   cp "$SRC_ROOT/Taskfile.yml" "$dir/" 2>/dev/null || true
 }
