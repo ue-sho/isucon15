@@ -46,6 +46,7 @@ bootstrap を実行する人だけ、追加で `uv tool install ansible-core`（
    | `APP_DIR` | アプリのディレクトリ（`/home/isucon` からの相対パス。例: `webapp/nodejs`） |
    | `APP_SERVICE` | アプリの systemd サービス名（例: `isuride-node.service`）。`systemctl list-units \| grep isu` で確認 |
    | `BUILD_CMD` | デプロイ時のビルドコマンド（TypeScript をビルドするなら `npm run build`。不要なら空） |
+   | `NODE_BIN_DIR` | node / npm の場所。`/home/isucon/local/*/bin` にあるなら空でよい（`ssh s1 'ls ~/local'` で確認） |
    | `DB_SERVICE` | `mysql` か `mariadb` |
    | `NGINX_LOG` / `SLOW_LOG` | ログのパス（基本は初期値のまま） |
    | `PPROTEIN_HOST` | pprotein 本体を置くホスト（ベンチで使われない s3 が初期値） |
@@ -53,6 +54,7 @@ bootstrap を実行する人だけ、追加で `uv tool install ansible-core`（
 
 3. `task bootstrap`（main ブランチで実行）。やること:
    - 3台に alp / slp / pprotein-agent（s3 には pprotein も）をインストール
+   - アプリを `APP_SERVICE` に切り替え（同じ問題の他言語の service は disable）
    - 元の `/etc/nginx` `/etc/mysql` を `/home/isucon/backup/` に退避
    - 3台の設定と s1 の `webapp/` を手元に集めて、初期コミットを main に push
    - 3台の `/home/isucon` をこのリポジトリに合わせる

@@ -2,6 +2,7 @@
 # テスト用のコマンド stub。呼び出しを偽ホストの calls.log に記録する。
 #   - $FAKE_HOSTS/$FAKE_HOST/fail-<cmd> があれば exit 1
 #   - systemctl is-enabled / is-active X は $FAKE_HOSTS/$FAKE_HOST/enabled に X があれば 0
+#     （is-active は $FAKE_HOSTS/$FAKE_HOST/inactive に X があれば失敗）
 set -euo pipefail
 
 cmd="$(basename "$0")"
@@ -22,7 +23,13 @@ fi
 
 if [ "$cmd" = systemctl ]; then
   case "${1:-}" in
-    is-enabled | is-active)
+    is-enabled)
+      grep -qxF -- "${2:-}" "$hostdir/enabled" 2>/dev/null
+      exit $?
+      ;;
+    is-active)
+      # $hostdir/inactive に書かれたサービスは「起動に失敗した」扱い
+      if grep -qxF -- "${2:-}" "$hostdir/inactive" 2>/dev/null; then exit 3; fi
       grep -qxF -- "${2:-}" "$hostdir/enabled" 2>/dev/null
       exit $?
       ;;

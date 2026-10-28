@@ -129,3 +129,44 @@ calls() { cat "$H/calls.log" 2>/dev/null || true; }
   run calls
   refute_contains "systemctl restart"
 }
+
+@test "fails with step=app-health when the app does not stay up after restart" {
+  echo isuapp-node.service >"$H/inactive"
+  deploy
+  assert_failure
+  assert_contains "step=app-health"
+  assert_contains "isuapp-node.service が起動していません"
+}
+
+@test "passes app-health when the app is active" {
+  deploy
+  assert_success
+  run calls
+  assert_contains "systemctl is-active isuapp-node.service"
+}
+
+@test "warns when APP_SERVICE is not enabled on the host" {
+  printf 'mysql\nnginx\n' >"$H/enabled"
+  deploy
+  assert_success
+  assert_contains "isuapp-node.service はこのホストで無効です"
+}
+
+@test "puts ISUCON-installed node (/home/isucon/local/*/bin) on PATH for npm" {
+  mkdir -p "$R/local/node/bin"
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/local-npm.log"\n' "$TMP" >"$R/local/node/bin/npm"
+  chmod +x "$R/local/node/bin/npm"
+  deploy
+  assert_success
+  assert_file_contains "$TMP/local-npm.log" "ci"
+}
+
+@test "NODE_BIN_DIR in config is put on PATH" {
+  mkdir -p "$TMP/nodebin"
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/cfg-npm.log"\n' "$TMP" >"$TMP/nodebin/npm"
+  chmod +x "$TMP/nodebin/npm"
+  echo "NODE_BIN_DIR=$TMP/nodebin" >>"$R/isutools/config.env"
+  deploy
+  assert_success
+  assert_file_contains "$TMP/cfg-npm.log" "ci"
+}

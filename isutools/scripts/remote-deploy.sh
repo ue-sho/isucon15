@@ -10,6 +10,14 @@ export REPO_ROOT="${ISUTOOLS_ROOT:-/home/isucon}"
 . "$REPO_ROOT/isutools/lib/common.sh"
 isu_load_config
 
+# ssh 経由の非対話シェルでは ~/.bashrc の PATH 追加が効かないため、
+# ISUCON がインストールした言語処理系（/home/isucon/local/*/bin）と NODE_BIN_DIR を明示的に足す
+for d in "$ISUTOOLS_ROOT"/local/*/bin; do
+  [ -d "$d" ] && PATH="$d:$PATH"
+done
+[ -z "${NODE_BIN_DIR:-}" ] || PATH="$NODE_BIN_DIR:$PATH"
+export PATH
+
 STATE_DIR="$ISUTOOLS_ROOT/.isutools"
 mkdir -p "$STATE_DIR"
 
@@ -87,6 +95,19 @@ for svc in "$DB_SERVICE" nginx "$APP_SERVICE"; do
     isu_sudo systemctl restart "$svc"
   fi
 done
+
+step=app-health
+# systemctl restart は Type=simple だとプロセスがすぐ落ちても成功を返すため、少し待って生存を確認する
+if is_enabled "$APP_SERVICE"; then
+  sleep "${ISUTOOLS_HEALTH_WAIT:-3}"
+  if ! systemctl is-active "$APP_SERVICE" >/dev/null 2>&1; then
+    echo "[$HOST] $APP_SERVICE が起動していません。直近のログ:"
+    isu_sudo journalctl -u "$APP_SERVICE" -n 20 --no-pager 2>/dev/null || true
+    exit 1
+  fi
+else
+  echo "[$HOST] ⚠ $APP_SERVICE はこのホストで無効です（再起動していません）"
+fi
 
 step=pprotein
 dropin="$ISUTOOLS_ETC/systemd/system/$APP_SERVICE.d/isutools.conf"

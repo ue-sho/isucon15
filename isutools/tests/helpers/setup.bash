@@ -11,6 +11,7 @@ common_setup() {
   export FAKE_HOSTS="$TMP/hosts"
   export ISUTOOLS_SSH="$HELPERS_DIR/fake-ssh"
   export FAKE_UNREACHABLE=""
+  export ISUTOOLS_HEALTH_WAIT=0
   export GIT_AUTHOR_NAME=tester GIT_AUTHOR_EMAIL=tester@example.com
   export GIT_COMMITTER_NAME=tester GIT_COMMITTER_EMAIL=tester@example.com
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig"
