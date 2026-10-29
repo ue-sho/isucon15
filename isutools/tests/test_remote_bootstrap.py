@@ -248,7 +248,7 @@ class BootstrapImportTests(Sandbox):
 
     def test_imports_and_pushes_initial_state(self):
         self.cli('bootstrap-import')
-        self.assertEqual(self.git(self.origin, 'log', '-1', '--format=%s', 'main'), 'chore: import initial server state')
+        self.assertEqual(self.git(self.origin, 'log', '-1', '--format=%s', 'main'), 'chore: configure initial profiling')
         files = self.files()
         for name in ['webapp/nodejs/app.ts', 's2/etc/nginx/nginx.conf', 's3/etc/systemd/system/isuapp-node.service',
                      's3/etc/systemd/system/pprotein.service', 's1/home/isucon/env.sh', 'isutools/hosts.env', 'isutools/pprotein/targets.single.json']:
@@ -258,6 +258,66 @@ class BootstrapImportTests(Sandbox):
         self.assertIn('S3_IP=10.0.0.3', (self.work / 'isutools/hosts.env').read_text())
         self.assertIn('# access_log /var/log/nginx/access.log; # disabled by isutools', (self.work / 's1/etc/nginx/nginx.conf').read_text())
         self.assertIn('PPROTEIN_URL=http://10.0.0.3:9000', (self.work / 's1/etc/systemd/system/isuapp-node.service.d/isutools.conf').read_text())
+
+    def test_initial_commit_preserves_config_before_instrumentation(self):
+        import json
+        self.cli('bootstrap-import')
+        metadata = json.loads((self.work / 'isutools/initial-state.json').read_text())
+        initial = metadata['commit']
+        self.assertEqual(metadata['phase'], 'configured')
+        self.assertEqual(self.git(self.work, 'log', '-1', '--format=%s', initial), 'chore: import initial server state')
+        for host in ['s1', 's2', 's3']:
+            original = self.git(self.work, 'show', f'{initial}:{host}/etc/nginx/nginx.conf')
+            self.assertNotIn('disabled by isutools', original)
+            self.assertIn('    access_log /var/log/nginx/access.log;', original)
+            self.assertEqual(self.git(self.work, 'show', f'{initial}:{host}/etc/mysql/my.cnf'), '[mysqld]')
+        initial_files = self.git(self.work, 'ls-tree', '-r', '--name-only', initial)
+        self.assertNotIn('isutools-log.conf', initial_files)
+        self.assertNotIn('debian.cnf', initial_files)
+        self.assertNotIn('node_modules', initial_files)
+        self.assertNotIn('webapp/sql/initial.sql', initial_files)
+        self.assertIn('webapp/nodejs/app.ts', initial_files)
+
+    def test_resumes_after_instrumentation_failure(self):
+        import json
+        config = self.work / 'isutools/config.env'
+        config.write_text(config.read_text() + '\nPPROTEIN_HOST=missing\n')
+        result = self.cli('bootstrap-import', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.git(self.work, 'log', '-1', '--format=%s'), 'chore: import initial server state')
+        initial = self.git(self.work, 'rev-parse', 'HEAD')
+        config.write_text(config.read_text().replace('PPROTEIN_HOST=missing\n', ''))
+        self.cli('bootstrap-import')
+        self.assertEqual(json.loads((self.work / 'isutools/initial-state.json').read_text())['commit'], initial)
+        self.assertEqual(self.git(self.origin, 'rev-parse', 'main'), self.git(self.work, 'rev-parse', 'HEAD'))
+
+    def test_retries_failed_push_without_creating_extra_commits(self):
+        from unittest.mock import patch
+        import subprocess
+        from isutools.lib.bootstrap import bootstrap_import
+        config = self.config()
+        original = config.git
+        def git(*args, **kwargs):
+            if args[0] == 'push':
+                raise subprocess.CalledProcessError(1, ['git', 'push'])
+            return original(*args, **kwargs)
+        with patch.object(config, 'git', side_effect=git):
+            with self.assertRaises(subprocess.CalledProcessError):
+                bootstrap_import(config)
+        prepared = self.git(self.work, 'rev-parse', 'HEAD')
+        self.assertNotEqual(self.git(self.origin, 'rev-parse', 'main'), prepared)
+        self.cli('bootstrap-import')
+        self.assertEqual(self.git(self.work, 'rev-parse', 'HEAD'), prepared)
+        self.assertEqual(self.git(self.origin, 'rev-parse', 'main'), prepared)
+
+    def test_existing_import_without_metadata_is_left_unchanged(self):
+        self.cli('bootstrap-import')
+        self.git(self.work, 'rm', '-q', 'isutools/initial-state.json')
+        self.git(self.work, 'commit', '-qm', 'legacy import without metadata')
+        before = self.git(self.work, 'rev-parse', 'HEAD')
+        self.assertIn('変更なし', self.cli('bootstrap-import').stdout)
+        self.assertEqual(self.git(self.work, 'rev-parse', 'HEAD'), before)
+        self.assertFalse((self.work / 'isutools/initial-state.json').exists())
 
     def test_ignores_large_files_and_root_env(self):
         result = self.cli('bootstrap-import')
@@ -291,7 +351,7 @@ class BootstrapImportTests(Sandbox):
         self.git(self.work, 'switch', '-q', '-c', 'test/bootstrap')
         self.cli('bootstrap-import', env={'BOOTSTRAP_BRANCH': 'test/bootstrap'})
         self.assertEqual(self.git(self.origin, 'rev-parse', 'main'), before)
-        self.assertEqual(self.git(self.origin, 'log', '-1', '--format=%s', 'test/bootstrap'), 'chore: import initial server state')
+        self.assertEqual(self.git(self.origin, 'log', '-1', '--format=%s', 'test/bootstrap'), 'chore: configure initial profiling')
 
     def test_explicit_branch_rejects_other_current_branch(self):
         result = self.cli('bootstrap-import', env={'BOOTSTRAP_BRANCH': 'test/bootstrap'}, check=False)
