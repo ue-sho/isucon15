@@ -26,18 +26,19 @@ task inspect -- s1 --database isuride --exact-counts
 task inspect -- s1 --no-db
 ```
 
-出力先は `reports/inventory/<UTC取得時刻>/` です。
+出力先は `docs/inventory/<UTC取得時刻>/` です。
 
 ```text
 README.md       # 全ホストの取得状況とリンク
-01-s1.md        # Issueへ貼れるホスト別の調査結果
+01-s1.md        # ホスト別の調査結果
 01-s1.json      # 同じ結果の機械可読形式
 02-s2.md
 02-s2.json
 ...
 ```
 
-生成物はGit管理から除外しています。投稿・pushは自動で行いません。内容を確認してMarkdownをIssueへ貼ってください。
+生成物はGit管理の対象です。内容を確認してから、`docs/inventory/`をコミット・pushしてください。
+コミット・pushやIssue投稿は自動で行いません。
 `--output <保存先>`、`--timeout 180` で保存先とホストごとの上限秒数を変更できます。最大4台を並列収集します。
 一部の項目・ホストを取得できなくても残りの結果を保存し、終了コード1を返します。取得成功は0、引数エラーは2です。
 ミドルウェアの実行ファイルが見つからない場合は `not-found`、明示的な省略は `skipped` と記録します。

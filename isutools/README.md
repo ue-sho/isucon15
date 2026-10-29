@@ -138,4 +138,5 @@ Ubuntu / Debian では `sudo apt install -y bats shellcheck jq rsync` でテス�
 ## 初期構成の調査
 
 bootstrapで初期状態を変更する前に、`task inspect -- s1 s2 s3`で構成を収集できます。
+結果は`docs/inventory/<UTC取得時刻>/`に保存され、内容を確認してからコミットできます。
 使い方と収集範囲は[初期構成調査](docs/initial-inventory.md)を参照してください。

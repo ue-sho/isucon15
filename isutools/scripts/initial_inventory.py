@@ -555,7 +555,7 @@ def collect_host(host, args, source):
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("hosts", nargs="*", help="SSH接続先（例: s1 s2 s3）")
-    parser.add_argument("--output", type=Path, default=Path("reports/inventory"))
+    parser.add_argument("--output", type=Path, default=Path("docs/inventory"))
     parser.add_argument("--database", action="append", default=[], help="対象DB名。複数回指定可")
     parser.add_argument("--db-type", choices=("auto", "mysql", "postgresql"), default="auto",
                         help="調査するDBの種類。autoはMySQL/MariaDBとPostgreSQLを調査")
