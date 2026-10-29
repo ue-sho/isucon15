@@ -34,8 +34,17 @@ tasks:
   test:
     desc: isutools のテストと lint（開発者向け）
     cmds:
+      - python3 -m unittest discover -s isutools/tests -p 'test_*.py' -v
       - bash isutools/tests/lint.sh
       - bats isutools/tests
       - cd isutools/profiler && npm ci --no-audit --no-fund --silent
       - node --test isutools/profiler/profiler.test.cjs
       - node --experimental-strip-types --test isutools/snippets/pprotein-collect.test.ts
+
+  bench:
+    desc: 3台へデプロイし、Ansibleでポータルベンチを1回実行
+    silent: true
+    requires:
+      vars: [PORTAL_TARGET_ID, PORTAL_COOKIE, PORTAL_CSRF_TOKEN]
+    cmds:
+      - bash isutools/scripts/deploy.sh --bench {{.BRANCH}}

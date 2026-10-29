@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 手元から3台すべてにデプロイする。
-#   usage: deploy.sh [branch]   （省略時は手元の現在ブランチ）
+#   usage: deploy.sh [--bench] [branch]   （省略時は手元の現在ブランチ）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,6 +14,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/../lib/summary.sh"
 isu_load_config
 cd "$REPO_ROOT"
+
+benchmark=false
+if [ "${1:-}" = --bench ]; then
+  benchmark=true
+  shift
+  if ! command -v ansible-playbook >/dev/null 2>&1; then
+    isu_err "ansible-playbook がありません。isutools/README.md の準備手順を確認してください"
+    exit 1
+  fi
+  if [ -z "${PORTAL_TARGET_ID:-}" ] || [ -z "${PORTAL_COOKIE:-}" ] || [ -z "${PORTAL_CSRF_TOKEN:-}" ]; then
+    isu_err "PORTAL_TARGET_ID・PORTAL_COOKIE・PORTAL_CSRF_TOKEN を環境変数に設定してください"
+    exit 1
+  fi
+fi
 
 branch="${1:-}"
 [ -n "$branch" ] || branch="$(current_branch)"
@@ -50,8 +64,23 @@ echo "$header"
 
 # shellcheck disable=SC2086
 lock_all "$deployer" $HOSTS
-# shellcheck disable=SC2086
-trap 'unlock_all $HOSTS' EXIT
+logdir=""
+bench_state=""
+cleanup() {
+  local rc=$?
+  if [ -n "$bench_state" ] && [ -e "$bench_state" ]; then
+    isu_warn "ベンチの終了を確認できないため、デプロイロックを保持します: $bench_state"
+    isu_warn "ポータルでジョブの終了を確認した後、task unlock で解除してください"
+  else
+    # shellcheck disable=SC2086
+    unlock_all $HOSTS
+    [ -z "$logdir" ] || rm -rf "$logdir"
+  fi
+  return "$rc"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo "▶ deploying to ${HOSTS// /, } ..."
 logdir="$(mktemp -d)"
@@ -71,7 +100,6 @@ done
 # shellcheck disable=SC2086
 summary="$(format_summary "$branch" "$sha" "$subject" "$logdir" $HOSTS)"
 echo "$summary"
-rm -rf "$logdir"
 
 bash "$SCRIPT_DIR/notify.sh" "$header
 $summary"
@@ -79,3 +107,9 @@ $summary"
 case "$summary" in
   *"✖ failed on:"*) exit 1 ;;
 esac
+
+if [ "$benchmark" = true ]; then
+  bench_state="$logdir/benchmark-state.json"
+  isu_info "Ansible でポータルベンチを実行（完了までデプロイロックを保持）"
+  (cd "$ISUTOOLS_DIR/ansible" && ISUTOOLS_BENCH_STATE="$bench_state" ISUTOOLS_BENCH_BRANCH="$branch" ISUTOOLS_BENCH_REV="$sha" ansible-playbook benchmark.yml)
+fi

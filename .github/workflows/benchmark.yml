@@ -1,0 +1,70 @@
+name: Benchmark
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: benchmark
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    if: vars.BENCH_ENABLED == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, isucon]
+    defaults:
+      run:
+        shell: bash
+    env:
+      REV: ${{ github.event.pull_request.head.sha }}
+      PR_BRANCH: ${{ github.head_ref }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: true # isutoolsのgit fetchで使う
+
+      - name: Deploy and benchmark
+        id: bench
+        env:
+          PORTAL_URL: ${{ vars.PORTAL_URL || 'https://portal.isucon.net' }}
+          PORTAL_TARGET_ID: ${{ vars.PORTAL_TARGET_ID }}
+          PORTAL_COOKIE: ${{ secrets.PORTAL_COOKIE }}
+          PORTAL_CSRF_TOKEN: ${{ secrets.PORTAL_CSRF_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          git switch -C "$PR_BRANCH" "$REV"
+          task bench BRANCH="$PR_BRANCH" 2>&1 | tee "$RUNNER_TEMP/benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"
+
+      - name: Comment on PR
+        if: always()
+        uses: actions/github-script@v9
+        env:
+          BENCH_OUTCOME: ${{ steps.bench.outcome }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const file = `${process.env.RUNNER_TEMP}/benchmark-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}.log`;
+            const output = fs.existsSync(file)
+              ? fs.readFileSync(file, 'utf8').trim().split('\n').slice(-20).join('\n').slice(-12000)
+              : 'ベンチ出力なし。実行ログを参照してください。';
+            const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: [
+                `対象: \`${process.env.REV}\``,
+                `反映・ベンチ: ${process.env.BENCH_OUTCOME}`,
+                `[実行ログ](${url})`,
+                '',
+                '```text',
+                output,
+                '```',
+              ].join('\n'),
+            });
