@@ -1,147 +1,161 @@
 # isutools
 
-ISUCON15 用のセットアップ・デプロイ・計測ツール。手元から `task` コマンドで3台（s1, s2, s3）を操作する。
-
-- セットアップは競技開始時に **1人が1回だけ** `task bootstrap`
-- デプロイは **誰でも** `task deploy`（手元の現在ブランチを3台すべてに反映）
-- 計測は pprotein（ベンチごとに httplog / slowlog / Node の pprof を自動収集）
-
-## 事前準備（全員）
-
-1. `task` をインストール（macOS: `brew install go-task`。Linux でも Go Task の `task` を使用）
-2. `~/.ssh/config` に3台を書く。**Host 名は全員 `s1` `s2` `s3` にそろえ、`ForwardAgent yes` を必ず入れる**
-   （サーバ上の git が手元の鍵で GitHub に接続するため。サーバに鍵は置かない）
-
-   ```
-   Host s1
-       HostName <s1 のグローバル IP>
-       User isucon
-       ForwardAgent yes
-   Host s2
-       HostName <s2 のグローバル IP>
-       User isucon
-       ForwardAgent yes
-   Host s3
-       HostName <s3 のグローバル IP>
-       User isucon
-       ForwardAgent yes
-   ```
-
-3. GitHub 用の鍵を agent に載せる。Linux は `eval "$(ssh-agent -s)"` → `ssh-add ~/.ssh/id_ed25519`、
-   macOS は `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`
-4. （任意）Discord に通知する場合、リポジトリ直下に `.env.isutools` を作る（コミットされない）
-
-   ```
-   DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-   ```
-
-bootstrap または bench を実行する人は、追加で `uv tool install ansible-core`（または `brew install ansible`）。
-
-サーバ間のプライベート IP 通信もセキュリティグループで許可しておく。
-計測にはアプリ → pprotein ホストの TCP 9000、pprotein ホスト → 計測対象の TCP 19000（agent）と
-6060（Node profiler）が必要。競技用の3台で共通のセキュリティグループを使う場合、
-ソースをそのグループ自身とした全通信の許可でもよい。DB 分割時の3306番などにも対応できる。
-
-## 競技開始時（1人だけ）
-
-1. 3台に `ssh s1` / `ssh s2` / `ssh s3` できることを確認する（host key の登録も兼ねる）
-2. `isutools/config.env` を問題に合わせて編集し、main に commit・push する
-
-   | 項目 | 内容 |
-   |---|---|
-   | `APP_DIR` | アプリのディレクトリ（`/home/isucon` からの相対パス。例: `webapp/nodejs`） |
-   | `APP_SERVICE` | アプリの systemd サービス名（例: `isuapp-node.service`）。実環境で確認 |
-   | `BUILD_CMD` | デプロイ時のビルドコマンド（TypeScript をビルドするなら `npm run build`。不要なら空） |
-   | `NODE_BIN_DIR` | node / npm の場所。`/home/isucon/local/*/bin` にあるなら空でよい（`ssh s1 'ls ~/local'` で確認） |
-   | `DB_SERVICE` | `mysql` か `mariadb` |
-   | `NGINX_LOG` / `SLOW_LOG` | ログのパス（基本は初期値のまま） |
-   | `PPROTEIN_HOST` | pprotein 本体を置くホスト（ベンチで使われない s3 が初期値） |
-   | `ENV_FILES` | ISUCON 提供の env ファイル。空なら `APP_SERVICE` の `EnvironmentFile=` から自動検出 |
-
-   使用言語の切替とアプリサービスの有効化・無効化は、実行前に手動で行う。
-   bootstrap はアプリサービスの有効化・無効化を変更しない。
-
-3. `task bootstrap`（main ブランチで実行）。やること:
-   - 3台に alp / slp / pprotein-agent（s3 には pprotein も）をインストール
-   - 元の `/etc/nginx` `/etc/mysql` を `/home/isucon/backup/` に退避
-   - 3台の設定と s1 の `webapp/` を手元に集めて、初期コミットを main に push
-   - 3台の `/home/isucon` をこのリポジトリに合わせる
-   - nginx のアクセスログ（LTSV）と MySQL の slow log（`long_query_time=0`）を有効にして初回デプロイ
-   - pprotein の計測対象を登録し、s1 から pprotein に届くか確認
-4. `/initialize` に `isutools/snippets/pprotein-collect.ts` の `triggerPproteinCollect()` を組み込む
-   （ハンドラの先頭で呼ぶ。await しない）→ ブランチを切って `task deploy`
-5. `task pprotein` で UI を開き、httplog の設定（alp の `matching_groups`）を問題の URL に合わせる
-
-## デプロイとベンチ実行
-
-`task bench BRANCH=feature/xxx`で3台へデプロイし、Ansibleからポータルのベンチを1回実行します。
-`DISCORD_WEBHOOK_URL`を設定すると、ベンチ結果もDiscordへ通知します。計測中もデプロイロックを保持します。設定、Actionsでの自動実行、タイムアウト時の復旧は[ベンチ実行手順](docs/benchmark.md)を参照してください。
-
-## 日常の流れ
-
-専用サーバで bootstrap 自体を検証する場合は、検証ブランチを push して
-`task bootstrap BRANCH=test/isutools-servers` を実行できる。
-初期状態の取り込み・push・サーバ同期・初回デプロイは指定ブランチで完結する。
-省略時は `main`。実行時のブランチは指定先と一致している必要がある。
-
-```
-git switch -c feature/xxx
-# 修正して commit
-git push -u origin feature/xxx
-task deploy          # 現在ブランチを3台に反映（結果は Discord にも流れる）
-# ポータルからベンチ → task pprotein で結果を見る
-# スコアが上がったら main にマージ
-```
-
-- `task deploy` は **push 済みの内容**を反映する。未 push・リモートとのズレがあれば何もせずに止まる
-- 別ブランチを反映するなら `task deploy BRANCH=feature/yyy`
-- 他の人がデプロイ中ならロックで止まる。冒頭に「直前に誰が何を反映したか」が出る
-- サーバの設定（nginx / MySQL / systemd）は `s1/` `s2/` `s3/` 配下を編集する。deploy が `/etc` に配置する
-  （`/etc` を直接いじっても次のデプロイで上書きされる）
-- ログ・計測の停止と再開は手動で行う。設定変更は該当ホストのファイルに反映する。
-  deploy は有効なサービスだけを再起動し、サービスの有効化・無効化は変更しない。
-  pprotein / agent の初回有効化は bootstrap で行う。
+ISUCON15 の構成調査・セットアップ・デプロイ・計測ツール。操作はリポジトリ直下の **Taskfile** にまとめ、運用処理とテストは **Python標準ライブラリ**で実装しています。Ansible は初期セットアップとベンチの実行、Node はアプリに組み込むプロファイラと収集スニペットに使います。
 
 ## コマンド一覧
 
 | コマンド | 内容 |
 |---|---|
-| `task bootstrap` | 競技開始時のセットアップ（1人が1回） |
-| `task deploy` | 現在ブランチを3台に反映（`BRANCH=` で指定可） |
-| `task status` | 3台のブランチ / commit / 最終デプロイ者 / サービス状態 / ロック |
-| `task pprotein` | pprotein の UI を開く（Ctrl-C で終了） |
-| `task pprotein:targets -- split` | サーバ分割後に計測対象を全ホストに広げる（戻すときは `single`） |
-| `task unlock` | 異常終了で残ったデプロイロックを解除 |
+| `task inspect` | `HOSTS` の初期構成を調査して `docs/inventory/` に保存 |
+| `task inspect -- s1 s2` | 指定したホストだけを調査 |
+| `task bootstrap` | 初期セットアップ・初期状態の取り込み・初回デプロイ・計測設定（1人が1回） |
+| `task deploy` | 現在ブランチの push 済みコミットを全ホストへ反映 |
+| `task deploy BRANCH=feature/xxx` | 指定ブランチを反映 |
+| `task bench BRANCH=feature/xxx` | デプロイしてポータルベンチを1回実行。省略時は現在ブランチ |
+| `task status` | commit・最終デプロイ者・サービス・ロックを確認 |
+| `task pprotein` | ポート転送して計測UIを開く。Ctrl-Cで終了 |
+| `task pprotein:targets -- split` | 全ホストを計測。`single` は先頭ホストだけを計測 |
+| `task unlock` | 残ったデプロイロックを確認して解除。`-- -y` で確認省略 |
+| `task test` | 運用ツールとNode計測部の全テスト |
 
-## 最終ベンチ前チェックリスト
+引数は `--` の後、対象ブランチは `BRANCH=...` で渡します。ブランチをシェルコードへ埋め込まず、共通CLIに環境変数で渡します。
 
-1. ログ設定・`PPROTEIN_ENABLED`・`NODE_OPTIONS` を手動で変更し、計測サービスを停止・無効化する
-2. `task status` で全ホストの `agent=inactive` を確認
-3. アクセスログ・slow log が増えていないことを確認
-4. 再起動試験: 3台を再起動して、アプリが動き計測が止まったままであることを確認
-5. main にマージした状態で最終ベンチ
+## 事前準備（全員）
+
+1. 手元に **Task（go-task）・Python 3.8以降・Git・OpenSSH・rsync** を用意します。macOS のTaskは `brew install go-task` で導入できます。Pythonの追加パッケージは不要です。
+2. `~/.ssh/config` のHost名をチームでそろえます。初期設定は `s1 s2 s3`、ユーザーは `isucon` です。`ForwardAgent yes` はサーバー上のGitが手元の鍵でGitHubに接続するために必要です。
+
+   ```sshconfig
+   Host s1
+       HostName <s1のグローバルIP>
+       User isucon
+       ForwardAgent yes
+   Host s2
+       HostName <s2のグローバルIP>
+       User isucon
+       ForwardAgent yes
+   Host s3
+       HostName <s3のグローバルIP>
+       User isucon
+       ForwardAgent yes
+   ```
+
+3. GitHub用の鍵をagentに載せます。Linuxは `eval "$(ssh-agent -s)"` → `ssh-add ~/.ssh/id_ed25519`、macOSは `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` です。
+4. 接続先にもPython 3.8以降が必要です。bootstrap / benchを実行する人は、追加で `uv tool install ansible-core` または `brew install ansible` でAnsibleを準備します。
+5. サーバー間の通信を許可します。計測にはアプリ → pproteinホストのTCP 9000、pproteinホスト → 計測対象のTCP 19000（agent）・6060（Node profiler）が必要です。DB分割時は3306番なども許可してください。
+
+## 設定
+
+全コマンドは同じ形式・優先順位で設定を読みます。**下の設定ほど優先**します。
+
+| 順序 | 場所 | 用途 |
+|---|---|---|
+| 1 | `isutools/config.env` | チーム共通の問題固有設定。編集してcommit・push |
+| 2 | `isutools/hosts.env` | bootstrapが収集・生成するプライベートIP。リポジトリで共有 |
+| 3 | リポジトリ直下の `.env.isutools` | 手元の認証情報・通知先。Git管理外 |
+| 4 | 環境変数 | 一時的な上書き、ActionsのVariables / Secrets |
+
+形式は1行に `KEY=VALUE`。空白を含む値はクォートします。`export KEY=VALUE` とコメントも使えます。**変数展開・コマンド置換・他ファイルのsourceは行いません**。既存のローカル設定で `$VAR` や `$(command)` を使っている場合は、実際の値に置き換えてください。
+
+```dotenv
+# .env.isutools の例。必要な項目だけ設定する
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+PORTAL_TARGET_ID=1
+PORTAL_COOKIE="<Cookieヘッダー全体>"
+PORTAL_CSRF_TOKEN="<CSRFトークン>"
+```
+
+`BUILD_CMD` はアプリのビルド時だけBashで実行するコマンドです。設定ファイルそのものは実行しません。
+
+競技開始時に確認する主な共通設定は次のとおりです。
+
+| 項目 | 内容 |
+|---|---|
+| `HOSTS` | SSHのHost名を空白区切りで指定。Ansibleの接続先もここから生成 |
+| `GIT_REMOTE` | 競技用リポジトリのURL |
+| `APP_DIR` | `/home/isucon` からの相対パス。例: `webapp/nodejs` |
+| `APP_SERVICE` | アプリのsystemdサービス名。初期値から必ず変更 |
+| `BUILD_CMD` | ビルドコマンド。不要なら空 |
+| `NODE_BIN_DIR` | Node / npmの場所。`/home/isucon/local/*/bin` なら空でよい |
+| `DB_SERVICE` | `mysql` または `mariadb` |
+| `NGINX_LOG` / `SLOW_LOG` | 計測ログのパス |
+| `PPROTEIN_HOST` | pprotein本体を置くホスト。初期値は `s3` |
+| `ENV_FILES` | ISUCON提供のenvファイル。空ならアプリunitの `EnvironmentFile=` から検出 |
+
+ベンチAPIの設定と認証の当日確認は[ベンチ実行手順](../docs/benchmark.md)を参照してください。
+
+## 競技開始時（1人だけ）
+
+1. `ssh s1` / `ssh s2` / `ssh s3` で接続を確認します。host keyの登録も兼ねます。
+2. **初期状態を変える前に** `task inspect` を実行します。結果は `docs/inventory/<UTC取得時刻>/` に保存します。内容を確認してからコミットしてください。収集範囲とオプションは[構成調査](../docs/initial-inventory.md)を参照してください。
+3. `isutools/config.env` を問題に合わせて編集し、mainにcommit・pushします。使用言語の切替とアプリサービスの有効化・無効化は手動で行います。
+4. mainで `task bootstrap` を実行します。
+   - Ansibleでalp / slp / pprotein-agentを全ホスト、pprotein本体を指定ホストに導入
+   - 元の `/etc/nginx` と `/etc/mysql` を `/home/isucon/backup/` に退避
+   - 各ホストの設定と先頭ホストの `webapp/` を取り込み、初期コミットをpush
+   - サーバーの `/home/isucon` をこのリポジトリに合わせる
+   - LTSVアクセスログ・MySQL slow log（`long_query_time=0`）・Nodeプロファイラの初期設定を生成してデプロイ
+   - 計測サービスを初回有効化し、targets登録と先頭ホストからの接続確認を実行
+5. `/initialize` の先頭で `isutools/snippets/pprotein-collect.ts` の `triggerPproteinCollect()` を呼びます。awaitせず、ブランチを切ってcommit・push → `task deploy` します。
+6. `task pprotein` でUIを開き、alpの `matching_groups` を問題のURLに合わせます。
+
+専用サーバーでbootstrapを検証するときは、検証ブランチをpushして `task bootstrap BRANCH=test/isutools-servers` を実行できます。実行時のブランチも指定先にそろえてください。初期取り込み・push・初回デプロイは指定ブランチで完結します。省略時はmainです。
+
+## 日常の流れ
+
+```sh
+git switch -c feature/xxx
+# 修正してcommit
+git push -u origin feature/xxx
+task deploy
+# ポータルからベンチを開始
+task pprotein
+# 結果を確認してmainへマージ
+```
+
+認証設定を確認できたら、`task bench` でデプロイとベンチをまとめて実行できます。`DISCORD_WEBHOOK_URL` を設定すると、デプロイ結果・ベンチ結果をDiscordへ通知します。通知失敗は処理の成否に影響しません。PRごとの自動実行は[Actionsの設定](../docs/benchmark.md)で有効化できます。
+
+- デプロイは **事前確認したpush済みコミット**を全ホストへ反映します。未push・originとのズレがあれば止まり、実行中に同じブランチへpushされても反映対象は変わりません。
+- デプロイ開始からベンチ完了まで、全ホストで同じロックを保持します。終了を確認できないベンチはロックを残し、状態ファイルの場所を表示します。ポータルで終了を確認してから `task unlock` してください。
+- nginx / MySQL / systemdの設定は `s1/` `s2/` `s3/` 配下を編集します。デプロイ時に `/etc` へ配置します。
+- デプロイは有効なサービスだけを再起動します。サービスの有効化・無効化と計測の停止・再開は手動で行います。pprotein / agentの初回有効化はbootstrapが行います。
+- DBなどを別ホストへ移したら、各ホストの設定と共通設定を変更してデプロイし、`task pprotein:targets -- split` で全ホストを計測します。
+
+## 最終ベンチ前
+
+1. ログ設定・`PPROTEIN_ENABLED`・`NODE_OPTIONS` を変更し、計測サービスを停止・無効化します。
+2. `task status` で全ホストの `agent=inactive` を確認します。
+3. アクセスログ・slow logが増えていないことを確認します。
+4. サーバーを再起動し、アプリが動き、計測が止まったままであることを確認します。
+5. mainへマージした状態で最終ベンチを実行します。
 
 ## 困ったとき
 
-- **`未 push のコミットが N 件あります`**: `git push` してから再実行
-- **`sN はデプロイ中です`**: 他の人のデプロイを待つ。異常終了で残っているなら `task unlock`
-- **`origin から main を取得できません`**: `ForwardAgent yes` と `ssh-add` を確認（`ssh s1 ssh -T git@github.com` で確認できる）
-- **`s1 から pprotein に届きません`**: s1 → s3 の 9000 番ポートが開いているか確認
-- **サーバ分割**: DB を移すなどしたら、該当ホストの `sN/etc` と `config.env` を編集 → `task deploy`、
-  計測は `task pprotein:targets -- split`
-- **`unsupported locale setting`**: `LC_ALL=C.UTF-8 LANG=C.UTF-8 task bootstrap` で実行する
-  （検証ブランチの場合は `BRANCH=...` も付ける）
-- **デプロイ後の接続確認だけ失敗した場合**: サーバ間通信を許可した後、
-  `task pprotein:targets -- single` で targets 登録と接続確認を再実行する
+- **未push・originとのズレ**: commit・pushまたはpullしてから再実行してください。
+- **デプロイ中のロック**: 他の人の作業を待ちます。異常終了なら、デプロイやベンチが動いていないことを確認して `task unlock` します。
+- **サーバー上のGitが取得に失敗**: `ForwardAgent yes` と `ssh-add` を確認します。`ssh s1 ssh -T git@github.com` で接続を確認できます。
+- **pproteinに届かない**: サーバー間通信とサービス状態を確認し、`task pprotein:targets -- single` で登録・接続確認をやり直します。
+- **初期同期でファイルが衝突**: 表示されたサーバー上のファイルを退避するか、リポジトリに取り込んでから再実行してください。
 
-## 開発者向け
+## 開発と構成
 
-`task test`（bats-core / shellcheck / Node 22+ が必要）。テストは偽ホスト（ローカルのディレクトリ）と
-偽 ssh（`isutools/tests/helpers/fake-ssh`）で動く。手元のスクリプトは macOS の bash 3.2 でも動くこと。
-Ubuntu / Debian では `sudo apt install -y bats shellcheck jq rsync` でテスト用ツールをインストールできる。
+```sh
+task test:python       # Python標準unittest。追加パッケージ不要
+task test:inventory    # 構成調査だけ（inspect:testも同じタスクの別名）
+task test:node         # Node 22+・npmが必要。依存導入後にnode:testを実行
+task test             # 上記のPython・Nodeテストをまとめて実行
+```
 
-## 初期構成の調査
+Pythonのテストは一時Gitリポジトリと偽SSH・偽サービスで動きます。競技サーバーへ接続しません。Nodeの計測テストはローカルでポートを開きます。Bats・ShellCheckは不要です。
 
-bootstrapで初期状態を変更する前に、`task inspect -- s1 s2 s3`で構成を収集できます。
-結果は`docs/inventory/<UTC取得時刻>/`に保存され、内容を確認してからコミットできます。
-使い方と収集範囲は[初期構成調査](docs/initial-inventory.md)を参照してください。
+| 場所 | 役割 |
+|---|---|
+| `Taskfile.yml` | 日常操作とテストの入口 |
+| `isutools/__main__.py` | Python共通CLI。TaskとAnsibleから呼び出す |
+| `isutools/lib/` | 設定・デプロイ・ロック・通知・設定生成・初期取り込み |
+| `isutools/scripts/` | 構成収集・ポータルAPI・リポジトリ初期同期の独立したPython処理 |
+| `isutools/ansible/` | 初期セットアップとベンチ実行のplaybook |
+| `isutools/templates/` | bootstrap時に生成する設定のテンプレート |
+| `isutools/profiler/` / `isutools/snippets/` | アプリに組み込むNode計測部 |
+| `isutools/tests/` | Pythonの単体・結合テストと偽ホスト用ヘルパー |
+| `docs/` | ベンチ・構成調査の詳細と調査結果 |

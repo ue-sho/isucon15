@@ -45,6 +45,8 @@ README.md       # 全ホストの取得状況とリンク
 `--db-type` は `auto`、`mysql`、`postgresql` から選びます。`auto` では両方のクライアントを調べ、
 `--database` は両方のDBに適用します。種類が分かっているホストでは `--db-type` を指定してください。
 
+接続先を省略した `task inspect` は、共通設定の `HOSTS` を使います。設定形式と優先順位は[isutools README](../isutools/README.md#設定)を参照してください。
+
 ## 収集する情報
 
 | 分類 | 内容 |
@@ -83,19 +85,18 @@ NodeはPATHのほか `/home/isucon/local/*/bin/node` と、読み取れる稼働
 [容量取得関数](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-DBSIZE)、
 [接続時の実行時間・読み取り専用・行セキュリティ設定](https://www.postgresql.org/docs/current/runtime-config-client.html)。
 
-## Taskfile
+## 実行入口と開発時の確認
 
-ルートの `Taskfile.yml` に `inspect` を用意しています。
-別のTaskfileと統合するときは、既存の `tasks:` 配下にこのタスクを追加してください。
-Taskを使わず `python3 isutools/scripts/initial_inventory.py s1 s2 s3` で直接実行することもできます。
-
-## 開発時の確認
+通常はリポジトリのTaskfileから実行します。接続先・オプションは `--` の後に渡します。
 
 ```sh
-python3 -m unittest discover -s isutools/tests -p 'test_*.py' -v
-python3 -m py_compile isutools/scripts/initial_inventory.py
-python3 isutools/scripts/initial_inventory.py --help
+task inspect
+task inspect -- s1 --db-type mysql --database isuxxx
+task inspect -- --help
+task test:inventory
 ```
 
-テストでは外部コマンドをモックし、DBの接続探索順・部分失敗時の継続、Nodeの検出、SSH引数、出力形式とCLIを確認します。
-構文と引数も確認できます。実際のLinuxサーバーへのSSH・sudo・MySQL/MariaDB・PostgreSQL接続は別途確認してください。
+運用ツール全体のテストは `task test:python`、Nodeの計測部も含める場合は `task test` です。
+Python標準のunittestと一時Gitリポジトリ・偽SSHを使い、外部サーバーへ接続しません。
+DBの接続探索順・部分失敗時の継続、Nodeの検出、SSH引数、出力形式とCLIを確認します。
+実際のLinuxサーバーへのSSH・sudo・MySQL/MariaDB・PostgreSQL接続は別途確認してください。
