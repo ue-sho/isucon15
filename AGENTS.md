@@ -23,7 +23,6 @@ ISUCON15で、仕様を満たしながらWebアプリケーションのチュー
 | `task pprotein` | 計測結果のUIを開く |
 | `task pprotein:targets -- split` | 全ホストを計測対象にする（`single`で先頭ホストのみ） |
 | `task unlock` | 終了を確認したデプロイ・ベンチの残存ロックを解除 |
-| `task test` | isutoolsのテストを実行 |
 
 操作・設定の詳細は [isutools README](isutools/README.md) を参照してください。
 改善仮説・検証結果は改善ごとのIssue、共通手順や構成はdocs、当日の実施チェックは [Issue #2](https://github.com/ue-sho/isucon15/issues/2) に記録します。
