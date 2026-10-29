@@ -137,7 +137,7 @@ task pprotein
 
 ## 当日の確認・終了前チェック
 
-担当別の初動、ベンチ・DB変更の調整、計測停止、再起動試験、最終ベンチのチェックは [Issue #2](https://github.com/ue-sho/isucon15/issues/2) で管理します。操作・設定の説明はこのREADME、当日の実施状況はIssueに記録します。
+担当別の初動・改善サイクル・終了前の手順は[競技当日の進め方](../docs/competition-workflow.md)にまとめています。[Issue #2](https://github.com/ue-sho/isucon15/issues/2) は当日の担当・実施チェック・結果へのリンクを管理します。改善仮説・対象コード・期待する効果と検証結果は、改善ごとのIssueに記録します。
 
 ## 困ったとき
 
