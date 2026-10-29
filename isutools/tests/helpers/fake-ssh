@@ -1,26 +1,19 @@
-#!/usr/bin/env bash
-# テスト用の ssh 代替。`fake-ssh <host> <command...>` を偽ホストの環境で実行する。
-set -euo pipefail
+#!/usr/bin/env python3
+"""Run an SSH command inside an isolated fake host; never open a network connection."""
+import os
+from pathlib import Path
+import sys
 
-host="$1"
-shift
-
-case " ${FAKE_UNREACHABLE:-} " in
-  *" $host "*)
-    echo "ssh: connect to host $host: Connection refused" >&2
-    exit 255
-    ;;
-esac
-
-root="${FAKE_HOSTS:?}/$host"
-[ -d "$root" ] || { echo "fake-ssh: unknown host $host" >&2; exit 255; }
-
-export FAKE_HOST="$host"
-export ISUTOOLS_ROOT="$root/home/isucon"
-export ISUTOOLS_ETC="$root/etc"
-export ISUTOOLS_SUDO=""
-stubs="$(cd "$(dirname "$0")" && pwd)/stubs"
-export PATH="$stubs:$PATH"
-
-cd "$ISUTOOLS_ROOT"
-exec bash -c "$*"
+host, *command = sys.argv[1:]
+if host in os.environ.get('FAKE_UNREACHABLE', '').split():
+    print(f'ssh: connect to host {host}: Connection refused', file=sys.stderr)
+    sys.exit(255)
+base = Path(os.environ['FAKE_HOSTS']) / host
+root = base / 'home/isucon'
+if not root.is_dir():
+    sys.exit(f'fake-ssh: unknown host {host}')
+env = {**os.environ, 'FAKE_HOST': host, 'ISUTOOLS_ROOT': str(root), 'REPO_ROOT': str(root),
+       'ISUTOOLS_ETC': str(base / 'etc'), 'ISUTOOLS_SUDO': '',
+       'PATH': str(Path(__file__).resolve().parent / 'stubs') + os.pathsep + os.environ['PATH']}
+os.chdir(root)
+os.execve('/bin/bash', ['bash', '--noprofile', '--norc', '-c', ' '.join(command)], env)

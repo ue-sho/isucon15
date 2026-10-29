@@ -1,5 +1,5 @@
 ---
-# deploy.sh --bench がサーバーのロックを保持したまま実行する。
+# task bench がサーバーのロックを保持したまま実行する。
 - name: Run one portal benchmark on the controller
   hosts: localhost
   connection: local
@@ -21,14 +21,17 @@
     - name: Notify Discord of the benchmark result
       ansible.builtin.command:
         argv:
-          - bash
-          - "{{ playbook_dir }}/../scripts/notify.sh"
+          - "{{ ansible_playbook_python }}"
+          - -m
+          - isutools
+          - notify
           - |-
             ▶ benchmark: {{ 'success' if portal_bench.rc == 0 else 'failed' }}
             ▶ branch: {{ lookup('env', 'ISUTOOLS_BENCH_BRANCH') }} ({{ lookup('env', 'ISUTOOLS_BENCH_REV') }})
             {{ portal_bench.stdout_lines | last | default('結果なし', true) }}
             {{ portal_bench.stderr }}
             {{ portal_bench.stdout_lines[:-1][-8:] | join('\n') }}
+        chdir: "{{ playbook_dir }}/../.."
       changed_when: true
       failed_when: false # 通知失敗はベンチ自体の成否に影響させない
 

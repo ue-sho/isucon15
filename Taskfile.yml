@@ -1,61 +1,71 @@
 version: '3'
 
+env:
+  REPO_ROOT: '{{.ROOT_DIR}}'
+  ISUTOOLS_BRANCH: '{{.BRANCH | default ""}}'
+
 tasks:
-
   inspect:
-    desc: SSH経由で初期構成を調査してMarkdownとJSONに保存
+    desc: 初期構成を調査して docs/inventory に保存（引数省略時は HOSTS）
     cmds:
-      - python3 isutools/scripts/initial_inventory.py {{.CLI_ARGS}}
-
-  inspect:test:
-    desc: 初期構成調査のテストを実行
-    cmds:
-      - python3 -m unittest discover -s isutools/tests -p 'test_initial_inventory.py' -v
+      - python3 -m isutools inspect {{.CLI_ARGS}}
 
   bootstrap:
-    desc: 競技開始時に1人が1回だけ実行（Ansible でセットアップ → 初回デプロイ → pprotein 設定）
+    desc: 初期セットアップ → 取り込み → デプロイ → 計測設定（1人が1回）
     cmds:
-      - bash isutools/scripts/bootstrap.sh {{.BRANCH}}
+      - python3 -m isutools bootstrap
 
   deploy:
-    desc: 手元の現在ブランチ（BRANCH=xxx で指定可）を3台すべてにデプロイ
+    desc: push 済みコミットを全ホストへデプロイ（BRANCH=xxx で指定可）
     cmds:
-      - bash isutools/scripts/deploy.sh {{.BRANCH}}
+      - python3 -m isutools deploy
+
+  bench:
+    desc: 全ホストへデプロイしてポータルベンチを1回実行
+    silent: true
+    cmds:
+      - python3 -m isutools bench
 
   status:
-    desc: 3台の反映状態（ブランチ / commit / 最終デプロイ者 / サービス / ロック）
+    desc: 全ホストの commit・デプロイ者・サービス・ロックを確認
     cmds:
-      - bash isutools/scripts/status.sh
+      - python3 -m isutools status
 
   unlock:
-    desc: 残ってしまったデプロイロックを解除（-- -y で確認省略）
+    desc: 残ったデプロイロックを解除（-- -y で確認省略）
     cmds:
-      - bash isutools/scripts/unlock.sh {{.CLI_ARGS}}
+      - python3 -m isutools unlock {{.CLI_ARGS}}
 
   pprotein:
-    desc: pprotein の UI を開く（ポートフォワード + ブラウザ。Ctrl-C で終了）
+    desc: ポート転送して計測 UI を開く（Ctrl-C で終了）
     cmds:
-      - bash isutools/scripts/pprotein.sh
+      - python3 -m isutools pprotein
 
   pprotein:targets:
-    desc: pprotein の計測対象を切り替える（task pprotein:targets -- single|split）
+    desc: 計測対象を切り替える（-- single または -- split）
     cmds:
-      - bash isutools/scripts/pprotein-targets.sh {{.CLI_ARGS}}
+      - python3 -m isutools targets {{.CLI_ARGS}}
 
   test:
-    desc: isutools のテストと lint（開発者向け）
+    desc: 運用ツールと Node プロファイラの全テスト
+    cmds:
+      - task: test:python
+      - task: test:node
+
+  test:python:
+    desc: 運用ツールの unittest（外部サーバーに接続しない）
     cmds:
       - python3 -m unittest discover -s isutools/tests -p 'test_*.py' -v
-      - bash isutools/tests/lint.sh
-      - bats isutools/tests
+
+  test:inventory:
+    aliases: [inspect:test]
+    desc: 初期構成調査の unittest
+    cmds:
+      - python3 -m unittest discover -s isutools/tests -p test_initial_inventory.py -v
+
+  test:node:
+    desc: Node プロファイラと収集スニペットのテスト
+    cmds:
       - cd isutools/profiler && npm ci --no-audit --no-fund --silent
       - node --test isutools/profiler/profiler.test.cjs
       - node --experimental-strip-types --test isutools/snippets/pprotein-collect.test.ts
-
-  bench:
-    desc: 3台へデプロイし、Ansibleでポータルベンチを1回実行
-    silent: true
-    requires:
-      vars: [PORTAL_TARGET_ID, PORTAL_COOKIE, PORTAL_CSRF_TOKEN]
-    cmds:
-      - bash isutools/scripts/deploy.sh --bench {{.BRANCH}}

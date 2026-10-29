@@ -1,38 +1,22 @@
-#!/usr/bin/env bash
-# テスト用のコマンド stub。呼び出しを偽ホストの calls.log に記録する。
-#   - $FAKE_HOSTS/$FAKE_HOST/fail-<cmd> があれば exit 1
-#   - systemctl is-enabled / is-active X は $FAKE_HOSTS/$FAKE_HOST/enabled に X があれば 0
-#     （is-active は $FAKE_HOSTS/$FAKE_HOST/inactive に X があれば失敗）
-set -euo pipefail
+#!/usr/bin/env python3
+"""Record fake service commands and inject failures without touching real services."""
+import os
+from pathlib import Path
+import sys
 
-cmd="$(basename "$0")"
-hostdir="$FAKE_HOSTS/${FAKE_HOST:-local}"
-mkdir -p "$hostdir"
-echo "$cmd $*" >>"$hostdir/calls.log"
-
-if [ -e "$hostdir/fail-$cmd" ]; then
-  echo "$cmd: injected failure" >&2
-  exit 1
-fi
-
-if [ "$cmd" = curl ]; then
-  case " $* " in
-    *" @- "*) cat >"$hostdir/curl.stdin" ;;
-  esac
-fi
-
-if [ "$cmd" = systemctl ]; then
-  case "${1:-}" in
-    is-enabled)
-      grep -qxF -- "${2:-}" "$hostdir/enabled" 2>/dev/null
-      exit $?
-      ;;
-    is-active)
-      # $hostdir/inactive に書かれたサービスは「起動に失敗した」扱い
-      if grep -qxF -- "${2:-}" "$hostdir/inactive" 2>/dev/null; then exit 3; fi
-      grep -qxF -- "${2:-}" "$hostdir/enabled" 2>/dev/null
-      exit $?
-      ;;
-  esac
-fi
-exit 0
+command = Path(sys.argv[0]).name
+args = sys.argv[1:]
+base = Path(os.environ['FAKE_HOSTS']) / os.environ.get('FAKE_HOST', 'local')
+base.mkdir(parents=True, exist_ok=True)
+with (base / 'calls.log').open('a') as output:
+    output.write(command + ' ' + ' '.join(args) + '\n')
+if (base / ('fail-' + command)).exists():
+    print(command + ': injected failure', file=sys.stderr)
+    sys.exit(1)
+if command == 'curl' and '@-' in args:
+    (base / 'curl.stdin').write_text(sys.stdin.read())
+if command == 'systemctl' and args and args[0] in ('is-enabled', 'is-active'):
+    def listed(name):
+        path = base / name
+        return path.exists() and args[1] in path.read_text().splitlines()
+    sys.exit(0 if listed('enabled') and not (args[0] == 'is-active' and listed('inactive')) else 3)

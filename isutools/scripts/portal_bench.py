@@ -11,7 +11,7 @@ import urllib.request
 
 
 # Field numbers and statuses match the current portal's bundled Protobuf schemas.
-# See isutools/docs/benchmark.md for the inspected JavaScript and public schemas.
+# See docs/benchmark.md for the inspected JavaScript and public schemas.
 STATUSES = {0: "PENDING", 1: "RUNNING", 2: "ERRORED", 3: "CANCELLED", 4: "FINISHED"}
 
 

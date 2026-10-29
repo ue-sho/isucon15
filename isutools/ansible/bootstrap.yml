@@ -1,5 +1,5 @@
 ---
-# isutools bootstrap: task bootstrap から実行する（isutools/scripts/bootstrap.sh 経由）。
+# isutools bootstrap: task bootstrap から実行する（Python の共通 CLI 経由）。
 # 変数は config.env を export した環境変数から読む。冪等であること。
 
 - name: Prepare servers
@@ -13,7 +13,7 @@
   tasks:
     - name: Install packages
       ansible.builtin.apt:
-        name: [htop, jq, unzip, graphviz, rsync, git]
+        name: [htop, jq, unzip, graphviz, rsync, git, python3]
         update_cache: true
         cache_valid_time: 3600
 
@@ -132,8 +132,10 @@
   connection: local
   gather_facts: false
   tasks:
-    - name: Run bootstrap-local.sh
-      ansible.builtin.command: bash {{ playbook_dir }}/../scripts/bootstrap-local.sh
+    - name: Import initial state through the shared CLI
+      ansible.builtin.command:
+        argv: ["{{ ansible_playbook_python }}", -m, isutools, bootstrap-import]
+        chdir: "{{ playbook_dir }}/../.."
       register: import_result
       changed_when: "'push しました' in import_result.stdout"
 
@@ -144,7 +146,7 @@
     git_remote: "{{ lookup('env', 'GIT_REMOTE') }}"
     bootstrap_branch: "{{ lookup('env', 'BOOTSTRAP_BRANCH') | default('main', true) }}"
   tasks:
-    - name: Run repo-sync.sh
-      ansible.builtin.script: "{{ playbook_dir }}/../scripts/repo-sync.sh {{ git_remote | quote }} {{ bootstrap_branch | quote }}"
+    - name: Sync the server repository
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/repo_sync.py {{ git_remote | quote }} {{ bootstrap_branch | quote }}"
       register: sync_result
       changed_when: true

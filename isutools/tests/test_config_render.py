@@ -21,6 +21,11 @@ class ConfigTests(unittest.TestCase):
         path.write_text('A=one # comment\nB="two words"\nC=\nexport D=three\nE=\'x$y`z`\'\n')
         self.assertEqual(read_env(path), {'A': 'one', 'B': 'two words', 'C': '', 'D': 'three', 'E': 'x$y`z`'})
 
+    def test_hashes_and_quoted_comments_remain_literal(self):
+        path = self.root / 'config.env'
+        path.write_text('A=token#fragment # comment\nB="# quoted value"\nC=\\#literal\n')
+        self.assertEqual(read_env(path), {'A': 'token#fragment', 'B': '# quoted value', 'C': '#literal'})
+
     def test_invalid_lines_report_location_without_exposing_value(self):
         for value in ['BAD LINE secret', 'KEY=secret words', 'KEY="secret']:
             with self.subTest(value=value):
@@ -49,7 +54,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_hosts_reject_unsafe_names_and_deduplicate(self):
         self.assertEqual(Config(self.root, {'HOSTS': 's1 s1 s2'}).hosts, ['s1', 's2'])
-        for value in ['', '-s1', 's1;touch', 's1/../s2']:
+        for value in ['', '-s1', '.', '..', 's1;touch', 's1/../s2']:
             with self.subTest(value=value), self.assertRaises(ToolError):
                 _ = Config(self.root, {'HOSTS': value}).hosts
 

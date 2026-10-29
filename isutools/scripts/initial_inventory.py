@@ -535,7 +535,8 @@ def collect_host(host, args, source):
                host, shlex.join(remote)]
     try:
         result = subprocess.run(command, input=source, capture_output=True, text=True,
-                                errors="replace", timeout=args.timeout, check=False)
+                                errors="replace", timeout=args.timeout, check=False,
+                                env=getattr(args, "environment", None))
         if result.returncode != 0:
             return host_error(host, "SSH接続またはリモート収集に失敗しました。SSH設定と接続先のpython3を確認してください。")
         report = json.loads(result.stdout)
@@ -552,7 +553,7 @@ def collect_host(host, args, source):
     return host_error(host, error)
 
 
-def parse_args():
+def parse_args(argv=None, default_hosts=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("hosts", nargs="*", help="SSH接続先（例: s1 s2 s3）")
     parser.add_argument("--output", type=Path, default=Path("docs/inventory"))
@@ -563,7 +564,7 @@ def parse_args():
     parser.add_argument("--no-db", action="store_true", help="DBへの接続を省略")
     parser.add_argument("--timeout", type=int, default=120, help="ホストごとの収集上限秒数")
     parser.add_argument("--collect", action="store_true", help=argparse.SUPPRESS)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.exact_counts and (not args.database or args.no_db):
         parser.error("--exact-countsには--databaseが必要です。--no-dbとは併用できません。")
     if any(not database for database in args.database) or args.timeout <= 0:
@@ -571,14 +572,17 @@ def parse_args():
     if args.collect:
         return args
     if not args.hosts:
+        args.hosts = list(default_hosts or [])
+    if not args.hosts:
         parser.error("SSH接続先を指定してください（例: s1 s2 s3）。")
     if any(host.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_.@:%\[\]-]+", host) for host in args.hosts):
         parser.error("SSH接続先にはHost名、user@host、IPアドレスを指定してください。")
     return args
 
 
-def main():
-    args = parse_args()
+def main(argv=None, default_hosts=None, environment=None):
+    args = parse_args(argv, default_hosts)
+    args.environment = environment
     if args.collect:
         print(json.dumps(collect(args), ensure_ascii=False))
         return 0

@@ -10,6 +10,23 @@ class ToolError(RuntimeError):
     pass
 
 
+def strip_comment(value):
+    quote, escaped = None, False
+    for index, char in enumerate(value):
+        if escaped:
+            escaped = False
+        elif char == "\\" and quote != "'":
+            escaped = True
+        elif quote:
+            if char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif char == '#' and (index == 0 or value[index - 1].isspace()):
+            return value[:index]
+    return value
+
+
 def read_env(path):
     values = {}
     if not path.exists():
@@ -23,7 +40,7 @@ def read_env(path):
             raise ToolError(f'{path}:{number}: KEY=VALUE で設定してください')
         key, value = match.groups()
         try:
-            parts = shlex.split(value, comments=True)
+            parts = shlex.split(strip_comment(value))
         except ValueError:
             raise ToolError(f'{path}:{number}: クォートが閉じていません') from None
         if len(parts) > 1:
@@ -57,7 +74,7 @@ class Config:
     @property
     def hosts(self):
         hosts = shlex.split(self.require('HOSTS'))
-        if not hosts or any(not re.fullmatch(r'[A-Za-z0-9_.-]+', host) or host.startswith('-') for host in hosts):
+        if not hosts or any(not re.fullmatch(r'[A-Za-z0-9_.-]+', host) or host.startswith('-') or host in ('.', '..') for host in hosts):
             raise ToolError('HOSTS には SSH の Host 名を空白区切りで指定してください')
         return list(dict.fromkeys(hosts))
 
