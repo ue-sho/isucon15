@@ -35,7 +35,7 @@ ISUCON15 用のセットアップ・デプロイ・計測ツール。手元か�
    DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
    ```
 
-bootstrap を実行する人だけ、追加で `uv tool install ansible-core`（または `brew install ansible`）。
+bootstrap または bench を実行する人は、追加で `uv tool install ansible-core`（または `brew install ansible`）。
 
 サーバ間のプライベート IP 通信もセキュリティグループで許可しておく。
 計測にはアプリ → pprotein ホストの TCP 9000、pprotein ホスト → 計測対象の TCP 19000（agent）と
@@ -71,6 +71,11 @@ bootstrap を実行する人だけ、追加で `uv tool install ansible-core`（
 4. `/initialize` に `isutools/snippets/pprotein-collect.ts` の `triggerPproteinCollect()` を組み込む
    （ハンドラの先頭で呼ぶ。await しない）→ ブランチを切って `task deploy`
 5. `task pprotein` で UI を開き、httplog の設定（alp の `matching_groups`）を問題の URL に合わせる
+
+## デプロイとベンチ実行
+
+`task bench BRANCH=feature/xxx`で3台へデプロイし、Ansibleからポータルのベンチを1回実行します。
+計測中もデプロイロックを保持します。設定、Actionsでの自動実行、タイムアウト時の復旧は[ベンチ実行手順](docs/benchmark.md)を参照してください。
 
 ## 日常の流れ
 

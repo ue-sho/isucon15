@@ -30,26 +30,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: true # isutoolsのgit fetchで使う
 
-      - name: Deploy
-        id: deploy
-        run: |
-          git switch -C "$PR_BRANCH" "$REV"
-          task deploy BRANCH="$PR_BRANCH"
-
-      - name: Benchmark
+      - name: Deploy and benchmark
         id: bench
         env:
           PORTAL_URL: ${{ vars.PORTAL_URL || 'https://portal.isucon.net' }}
           PORTAL_TARGET_ID: ${{ vars.PORTAL_TARGET_ID }}
           PORTAL_COOKIE: ${{ secrets.PORTAL_COOKIE }}
           PORTAL_CSRF_TOKEN: ${{ secrets.PORTAL_CSRF_TOKEN }}
-        run: task bench 2>&1 | tee "$RUNNER_TEMP/benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"
+        run: |
+          git switch -C "$PR_BRANCH" "$REV"
+          task bench BRANCH="$PR_BRANCH" 2>&1 | tee "$RUNNER_TEMP/benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"
 
       - name: Comment on PR
         if: always()
         uses: actions/github-script@v9
         env:
-          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
           BENCH_OUTCOME: ${{ steps.bench.outcome }}
         with:
           script: |
@@ -64,7 +59,7 @@ jobs:
               issue_number: context.issue.number,
               body: [
                 `対象: \`${process.env.REV}\``,
-                `反映: ${process.env.DEPLOY_OUTCOME} / ベンチ: ${process.env.BENCH_OUTCOME}`,
+                `反映・ベンチ: ${process.env.BENCH_OUTCOME}`,
                 `[実行ログ](${url})`,
                 '',
                 '```text',

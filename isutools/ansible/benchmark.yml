@@ -1,0 +1,24 @@
+---
+# deploy.sh --bench がサーバーのロックを保持したまま実行する。
+- name: Run one portal benchmark on the controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Start the benchmark and wait for its terminal status
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ playbook_dir }}/../scripts/portal_bench.py"
+      register: portal_bench
+      changed_when: true
+      failed_when: false
+
+    - name: Show benchmark output
+      ansible.builtin.debug:
+        msg: "{{ portal_bench.stdout_lines + portal_bench.stderr_lines }}"
+
+    - name: Require a successful benchmark result
+      ansible.builtin.assert:
+        that: portal_bench.rc == 0
+        fail_msg: ベンチが失敗しました。上記の出力とポータルのジョブ状態を確認してください。

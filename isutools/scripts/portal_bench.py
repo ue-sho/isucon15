@@ -3,6 +3,7 @@
 import io
 import json
 import os
+from pathlib import Path
 import sys
 import time
 import urllib.error
@@ -10,7 +11,7 @@ import urllib.request
 
 
 # Field numbers and statuses match the current portal's bundled Protobuf schemas.
-# See README for the inspected JavaScript and the corresponding public schemas.
+# See isutools/docs/benchmark.md for the inspected JavaScript and public schemas.
 STATUSES = {0: "PENDING", 1: "RUNNING", 2: "ERRORED", 3: "CANCELLED", 4: "FINISHED"}
 
 
@@ -88,8 +89,12 @@ def main():
                 raise RuntimeError("Protobuf以外の応答です。ログイン状態とAPI仕様を確認してください。")
             return fields(fields(response.read())[1])  # Response.job = field 1
 
+    # Write before POST: a lost response can still mean a job was accepted.
+    state = Path(os.environ["ISUTOOLS_BENCH_STATE"])
+    state.write_text(json.dumps({"status": "submission-unknown"}) + "\n", encoding="utf-8")
     job = request("", b"\x08" + encode_varint(target))  # Request.target_id = field 1
     job_id = job[1]
+    state.write_text(json.dumps({"job_id": job_id, "status": "active"}) + "\n", encoding="utf-8")
     print(f"job_id={job_id}", flush=True)
     deadline = time.monotonic() + 600
     while job.get(4, 0) in (0, 1):  # Job.status = field 4; PENDING / RUNNING
@@ -99,6 +104,9 @@ def main():
         job = request(f"/{job_id}")
 
     status = job.get(4, 0)
+    if status not in (2, 3, 4):
+        raise RuntimeError("ジョブの終了を確認できません。ポータル上で状態を確認してください。")
+    state.unlink()  # Only a confirmed terminal job permits the deploy lock to be released.
     if status == 4 and 18 not in job:
         raise RuntimeError("FINISHEDの応答にベンチ結果がありません。API仕様を確認してください。")
     result = fields(job.get(18, b""))  # Job.result = field 18

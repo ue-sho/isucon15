@@ -119,3 +119,63 @@ do_deploy() {
   assert_success
   assert_contains "Discord への通知に失敗しました"
 }
+
+prepare_benchmark() {
+  export PORTAL_TARGET_ID=1 PORTAL_COOKIE=dummy PORTAL_CSRF_TOKEN=dummy
+  mkdir -p "$TMP/bin"
+  cat >"$TMP/bin/ansible-playbook" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$1" = benchmark.yml ]
+for h in s1 s2 s3; do
+  [ -d "$FAKE_HOSTS/$h/home/isucon/.isutools/deploy.lock" ]
+done
+# A second ordinary deploy must fail while the benchmark holds the same locks.
+if bash "$REPO_ROOT/isutools/scripts/deploy.sh" >"$TMP/concurrent.log" 2>&1; then
+  echo 'concurrent deployment unexpectedly succeeded' >&2
+  exit 99
+fi
+grep -q 'デプロイ中' "$TMP/concurrent.log"
+echo 'mock benchmark executed with locks held'
+case "${BENCH_TEST_RESULT:-success}" in
+  success) exit 0 ;;
+  failed) exit 1 ;;
+  unknown) echo '{"job_id":123,"status":"active"}' >"$ISUTOOLS_BENCH_STATE"; exit 1 ;;
+esac
+SH
+  chmod +x "$TMP/bin/ansible-playbook"
+  export PATH="$TMP/bin:$PATH"
+}
+
+@test "benchmark holds deploy locks through Ansible and releases confirmed outcomes" {
+  prepare_benchmark
+  for result in success failed; do
+    export BENCH_TEST_RESULT="$result"
+    do_deploy --bench
+    if [ "$result" = success ]; then assert_success; else assert_failure; fi
+    assert_contains 'mock benchmark executed with locks held'
+    for h in s1 s2 s3; do [ ! -e "$(lockdir "$h")" ]; done
+  done
+}
+
+@test "unfinished benchmark retains locks and blocks the next deploy" {
+  prepare_benchmark
+  export BENCH_TEST_RESULT=unknown
+  do_deploy --bench
+  assert_failure
+  assert_contains 'デプロイロックを保持します'
+  for h in s1 s2 s3; do [ -d "$(lockdir "$h")" ]; done
+  do_deploy
+  assert_failure
+  assert_contains 'デプロイ中'
+}
+
+@test "failed deployment never starts the benchmark and releases locks" {
+  prepare_benchmark
+  echo nginx >"$FAKE_HOSTS/s2/enabled"
+  touch "$FAKE_HOSTS/s2/fail-nginx"
+  do_deploy --bench
+  assert_failure
+  refute_contains 'mock benchmark executed with locks held'
+  for h in s1 s2 s3; do [ ! -e "$(lockdir "$h")" ]; done
+}
