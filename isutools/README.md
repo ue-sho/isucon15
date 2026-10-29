@@ -92,7 +92,8 @@ PORTAL_CSRF_TOKEN="<CSRFトークン>"
 4. mainで `task bootstrap` を実行します。
    - Ansibleでalp / slp / pprotein-agentを全ホスト、pprotein本体を指定ホストに導入
    - 元の `/etc/nginx` と `/etc/mysql` を `/home/isucon/backup/` に退避
-   - 各ホストの設定と先頭ホストの `webapp/` を取り込み、初期コミットをpush
+   - 各ホストの設定と先頭ホストの `webapp/` を取り込み、計測設定を変更する前の初期コミットを保存
+   - 計測設定は別コミットにし、初期コミットとまとめてpush。初期SHAを `isutools/initial-state.json` に記録
    - サーバーの `/home/isucon` をこのリポジトリに合わせる
    - LTSVアクセスログ・MySQL slow log（`long_query_time=0`）・Nodeプロファイラの初期設定を生成してデプロイ
    - 計測サービスを初回有効化し、targets登録と先頭ホストからの接続確認を実行
@@ -100,6 +101,19 @@ PORTAL_CSRF_TOKEN="<CSRFトークン>"
 6. `task pprotein` でUIを開き、alpの `matching_groups` を問題のURLに合わせます。
 
 専用サーバーでbootstrapを検証するときは、検証ブランチをpushして `task bootstrap BRANCH=test/isutools-servers` を実行できます。実行時のブランチも指定先にそろえてください。初期取り込み・push・初回デプロイは指定ブランチで完結します。省略時はmainです。
+
+## 初期状態の参照
+
+bootstrapは、収集したコード・ホスト別設定を変更前のコミットとして残し、その後に計測設定を別コミットで追加します。初期SHAは `isutools/initial-state.json` の `commit` で確認できます。
+
+```sh
+git show <初期SHA>:s1/etc/nginx/nginx.conf
+git diff <初期SHA> -- webapp s1 s2 s3
+```
+
+初期SHAを基準に、コードや設定の変更を追えます。サービスの有効化・無効化など、ファイル以外の状態はGit履歴の対象に含まれません。
+
+DBデータのバックアップは行いません。`node_modules`、`debian.cnf`、`LARGE_FILE_MB` を超えるファイルもGit対象外です。元のnginx / MySQL設定はサーバーの `/home/isucon/backup/etc/` にも残します。
 
 ## 日常の流れ
 
@@ -121,13 +135,9 @@ task pprotein
 - デプロイは有効なサービスだけを再起動します。サービスの有効化・無効化と計測の停止・再開は手動で行います。pprotein / agentの初回有効化はbootstrapが行います。
 - DBなどを別ホストへ移したら、各ホストの設定と共通設定を変更してデプロイし、`task pprotein:targets -- split` で全ホストを計測します。
 
-## 最終ベンチ前
+## 当日の確認・終了前チェック
 
-1. ログ設定・`PPROTEIN_ENABLED`・`NODE_OPTIONS` を変更し、計測サービスを停止・無効化します。
-2. `task status` で全ホストの `agent=inactive` を確認します。
-3. アクセスログ・slow logが増えていないことを確認します。
-4. サーバーを再起動し、アプリが動き、計測が止まったままであることを確認します。
-5. mainへマージした状態で最終ベンチを実行します。
+担当別の初動、ベンチ・DB変更の調整、計測停止、再起動試験、最終ベンチのチェックは [Issue #2](https://github.com/ue-sho/isucon15/issues/2) で管理します。操作・設定の説明はこのREADME、当日の実施状況はIssueに記録します。
 
 ## 困ったとき
 
