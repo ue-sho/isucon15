@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# テスト用の ssh 代替。`fake-ssh <host> <command...>` を偽ホストの環境で実行する。
+set -euo pipefail
+
+host="$1"
+shift
+
+case " ${FAKE_UNREACHABLE:-} " in
+  *" $host "*)
+    echo "ssh: connect to host $host: Connection refused" >&2
+    exit 255
+    ;;
+esac
+
+root="${FAKE_HOSTS:?}/$host"
+[ -d "$root" ] || { echo "fake-ssh: unknown host $host" >&2; exit 255; }
+
+export FAKE_HOST="$host"
+export ISUTOOLS_ROOT="$root/home/isucon"
+export ISUTOOLS_ETC="$root/etc"
+export ISUTOOLS_SUDO=""
+stubs="$(cd "$(dirname "$0")" && pwd)/stubs"
+export PATH="$stubs:$PATH"
+
+cd "$ISUTOOLS_ROOT"
+exec bash -c "$*"

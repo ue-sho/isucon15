@@ -86,14 +86,14 @@ NodeはPATHのほか `/home/isucon/local/*/bin/node` と、読み取れる稼働
 
 ルートの `Taskfile.yml` に `inspect` を用意しています。
 別のTaskfileと統合するときは、既存の `tasks:` 配下にこのタスクを追加してください。
-Taskを使わず `python3 scripts/initial_inventory.py s1 s2 s3` で直接実行することもできます。
+Taskを使わず `python3 isutools/scripts/initial_inventory.py s1 s2 s3` で直接実行することもできます。
 
 ## 開発時の確認
 
 ```sh
-python3 -m unittest discover -s tests -v
-python3 -m py_compile scripts/initial_inventory.py
-python3 scripts/initial_inventory.py --help
+python3 -m unittest discover -s isutools/tests -p 'test_*.py' -v
+python3 -m py_compile isutools/scripts/initial_inventory.py
+python3 isutools/scripts/initial_inventory.py --help
 ```
 
 テストでは外部コマンドをモックし、DBの接続探索順・部分失敗時の継続、Nodeの検出、SSH引数、出力形式とCLIを確認します。

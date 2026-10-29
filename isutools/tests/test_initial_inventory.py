@@ -9,7 +9,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from scripts import initial_inventory as inventory
+from isutools.scripts import initial_inventory as inventory
 
 
 def arguments(**overrides):

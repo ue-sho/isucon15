@@ -1,0 +1,150 @@
+---
+# isutools bootstrap: task bootstrap から実行する（isutools/scripts/bootstrap.sh 経由）。
+# 変数は config.env を export した環境変数から読む。冪等であること。
+
+- name: Prepare servers
+  hosts: isucon
+  become: true
+  vars:
+    alp_version: "{{ lookup('env', 'ALP_VERSION') }}"
+    slp_version: "{{ lookup('env', 'SLP_VERSION') }}"
+    pprotein_version: "{{ lookup('env', 'PPROTEIN_VERSION') }}"
+    pprotein_host: "{{ lookup('env', 'PPROTEIN_HOST') }}"
+  tasks:
+    - name: Install packages
+      ansible.builtin.apt:
+        name: [htop, jq, unzip, graphviz, rsync, git]
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install alp
+      ansible.builtin.unarchive:
+        src: "https://github.com/tkuchiki/alp/releases/download/v{{ alp_version }}/alp_linux_amd64.zip"
+        dest: /usr/local/bin
+        remote_src: true
+        include: [alp]
+        creates: /usr/local/bin/alp
+
+    - name: Install slp
+      ansible.builtin.unarchive:
+        src: "https://github.com/tkuchiki/slp/releases/download/v{{ slp_version }}/slp_linux_amd64.tar.gz"
+        dest: /usr/local/bin
+        remote_src: true
+        include: [slp]
+        creates: /usr/local/bin/slp
+
+    - name: Install pprotein-agent (and pprotein on the pprotein host)
+      ansible.builtin.unarchive:
+        src: "https://github.com/kaz/pprotein/releases/download/v{{ pprotein_version }}/pprotein_{{ pprotein_version }}_linux_amd64.tar.gz"
+        dest: /usr/local/bin
+        remote_src: true
+        include: "{{ ['pprotein-agent', 'pprotein'] if inventory_hostname == pprotein_host else ['pprotein-agent'] }}"
+        creates: "/usr/local/bin/{{ 'pprotein' if inventory_hostname == pprotein_host else 'pprotein-agent' }}"
+
+    - name: Register github.com host key
+      become: false
+      ansible.builtin.known_hosts:
+        name: github.com
+        key: "{{ lookup('ansible.builtin.pipe', 'ssh-keyscan -t ed25519 github.com 2>/dev/null') }}"
+        path: /home/isucon/.ssh/known_hosts
+
+    - name: Back up original /etc/nginx and /etc/mysql (first run only)
+      ansible.builtin.shell: |
+        set -e
+        mkdir -p /home/isucon/backup/etc
+        for d in nginx mysql; do
+          [ ! -d "/etc/$d" ] || cp -a "/etc/$d" /home/isucon/backup/etc/
+        done
+        chown -R isucon:isucon /home/isucon/backup
+      args:
+        creates: /home/isucon/backup/etc
+
+- name: Collect server state into isutools/.bootstrap
+  hosts: isucon
+  become: true
+  vars:
+    app_service: "{{ lookup('env', 'APP_SERVICE') }}"
+    env_files_override: "{{ lookup('env', 'ENV_FILES') }}"
+    out: "{{ playbook_dir }}/../.bootstrap/{{ inventory_hostname }}"
+  tasks:
+    - name: Create local collection dirs
+      become: false
+      delegate_to: localhost
+      ansible.builtin.file:
+        path: "{{ out }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: [etc/systemd/system, home/isucon]
+
+    - name: Save private IP
+      become: false
+      delegate_to: localhost
+      ansible.builtin.copy:
+        content: "{{ ansible_default_ipv4.address }}\n"
+        dest: "{{ out }}/ip"
+        mode: "0644"
+
+    - name: Pull /etc/nginx and /etc/mysql
+      ansible.posix.synchronize:
+        mode: pull
+        src: "/etc/{{ item }}/"
+        dest: "{{ out }}/etc/{{ item }}/"
+        rsync_opts: ["--exclude=debian.cnf"]
+      loop: [nginx, mysql]
+
+    - name: Find the app unit file  # noqa: command-instead-of-module 読み取りのみ
+      ansible.builtin.command: systemctl show -p FragmentPath --value {{ app_service }}
+      register: unit_path
+      changed_when: false
+      failed_when: unit_path.stdout == ""
+
+    - name: Fetch the app unit file
+      ansible.builtin.fetch:
+        src: "{{ unit_path.stdout }}"
+        dest: "{{ out }}/etc/systemd/system/{{ app_service }}"
+        flat: true
+
+    - name: Detect ISUCON env files from EnvironmentFile=  # noqa: command-instead-of-module 読み取りのみ
+      ansible.builtin.command: sed -n 's/^[[:space:]]*EnvironmentFile=-\{0,1\}//p' {{ unit_path.stdout }}
+      register: env_detected
+      changed_when: false
+
+    - name: Fetch env files under /home/isucon
+      vars:
+        env_files: "{{ env_files_override.split() if env_files_override else env_detected.stdout_lines }}"
+      ansible.builtin.fetch:
+        src: "{{ item }}"
+        dest: "{{ out }}/home/isucon/{{ item | basename }}"
+        flat: true
+        fail_on_missing: false
+      loop: "{{ env_files | select('match', '^/home/isucon/[^/]+$') | list }}"
+
+    - name: Pull webapp from the first host
+      when: inventory_hostname == groups['isucon'][0]
+      ansible.posix.synchronize:
+        mode: pull
+        src: /home/isucon/webapp/
+        dest: "{{ out }}/webapp/"
+        rsync_opts: ["--exclude=node_modules"]
+
+- name: Import into the repository and push the initial commit
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Run bootstrap-local.sh
+      ansible.builtin.command: bash {{ playbook_dir }}/../scripts/bootstrap-local.sh
+      register: import_result
+      changed_when: "'push しました' in import_result.stdout"
+
+- name: Sync server repositories
+  hosts: isucon
+  gather_facts: false
+  vars:
+    git_remote: "{{ lookup('env', 'GIT_REMOTE') }}"
+    bootstrap_branch: "{{ lookup('env', 'BOOTSTRAP_BRANCH') | default('main', true) }}"
+  tasks:
+    - name: Run repo-sync.sh
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/repo-sync.sh {{ git_remote | quote }} {{ bootstrap_branch | quote }}"
+      register: sync_result
+      changed_when: true

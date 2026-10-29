@@ -1,2 +1,8 @@
 __pycache__/
+node_modules/
+*.log
+.env.isutools
+/backup/
+/.isutools/
+/isutools/.bootstrap/
 reports/inventory/

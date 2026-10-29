@@ -1,0 +1,15 @@
+# isutools 管理ファイル（手で編集しない）
+[Unit]
+Description=pprotein (isutools)
+After=network.target
+
+[Service]
+User=isucon
+Environment=PORT=9000
+StateDirectory=pprotein
+WorkingDirectory=/var/lib/pprotein
+ExecStart=/usr/local/bin/pprotein
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

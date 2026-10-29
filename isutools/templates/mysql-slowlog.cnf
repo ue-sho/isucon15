@@ -1,0 +1,3 @@
+# bootstrap で生成した初期設定。以後の変更はリポジトリで管理する。
+[mysqld]
+@@SLOWLOG_SETTINGS@@
