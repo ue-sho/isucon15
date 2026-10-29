@@ -139,3 +139,9 @@ task deploy          # 現在ブランチを3台に反映（結果は Discord �
 `task test`（bats-core / shellcheck / Node 22+ が必要）。テストは偽ホスト（ローカルのディレクトリ）と
 偽 ssh（`isutools/tests/helpers/fake-ssh`）で動く。手元のスクリプトは macOS の bash 3.2 でも動くこと。
 Ubuntu / Debian では `sudo apt install -y bats shellcheck jq rsync` でテスト用ツールをインストールできる。
+
+## 初期構成の調査
+
+bootstrapで初期状態を変更する前に、`task inspect -- s1 s2 s3`で構成を収集できます。
+結果は`docs/inventory/<UTC取得時刻>/`に保存され、内容を確認してからコミットできます。
+使い方と収集範囲は[初期構成調査](docs/initial-inventory.md)を参照してください。

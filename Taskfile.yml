@@ -1,6 +1,17 @@
 version: '3'
 
 tasks:
+
+  inspect:
+    desc: SSH経由で初期構成を調査してMarkdownとJSONに保存
+    cmds:
+      - python3 isutools/scripts/initial_inventory.py {{.CLI_ARGS}}
+
+  inspect:test:
+    desc: 初期構成調査のテストを実行
+    cmds:
+      - python3 -m unittest discover -s isutools/tests -p 'test_initial_inventory.py' -v
+
   bootstrap:
     desc: 競技開始時に1人が1回だけ実行（Ansible でセットアップ → 初回デプロイ → pprotein 設定）
     cmds:
