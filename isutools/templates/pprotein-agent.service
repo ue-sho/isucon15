@@ -1,0 +1,17 @@
+# isutools 管理ファイル（手で編集しない）
+[Unit]
+Description=pprotein-agent (isutools)
+After=network.target
+
+[Service]
+User=isucon
+SupplementaryGroups=adm mysql
+Environment=PORT=19000
+Environment=PPROTEIN_HTTPLOG=@@NGINX_LOG@@
+Environment=PPROTEIN_SLOWLOG=@@SLOW_LOG@@
+Environment=PPROTEIN_GIT_REPOSITORY=/home/isucon
+ExecStart=/usr/local/bin/pprotein-agent
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

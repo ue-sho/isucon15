@@ -22,18 +22,19 @@ jobs:
         shell: bash
     env:
       REV: ${{ github.event.pull_request.head.sha }}
-      APP_HOST: ${{ vars.APP_HOST }}
-      APP_DIR: ${{ vars.APP_DIR }}
-      DEPLOY_COMMAND: ${{ vars.DEPLOY_COMMAND }}
+      PR_BRANCH: ${{ github.head_ref }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
+          fetch-depth: 0
+          persist-credentials: true # isutoolsのgit fetchで使う
 
       - name: Deploy
         id: deploy
-        run: task deploy
+        run: |
+          git switch -C "$PR_BRANCH" "$REV"
+          task deploy BRANCH="$PR_BRANCH"
 
       - name: Benchmark
         id: bench
