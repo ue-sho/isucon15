@@ -16,8 +16,6 @@ ISUCON15で、仕様を満たしながらWebアプリケーションのチュー
 
 | コマンド | 用途 |
 |---|---|
-| `task inspect` | 初期構成を調査し、`docs/inventory/` に保存 |
-| `task bootstrap` | 初期セットアップ（1人が1回） |
 | `task deploy` | 現在ブランチのpush済みコミットを全ホストへ反映 |
 | `task deploy BRANCH=feature/xxx` | 指定ブランチを反映 |
 | `task bench` | デプロイしてベンチを実行（ポータルの認証設定が必要） |
