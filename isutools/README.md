@@ -75,7 +75,7 @@ bootstrap または bench を実行する人は、追加で `uv tool install ans
 ## デプロイとベンチ実行
 
 `task bench BRANCH=feature/xxx`で3台へデプロイし、Ansibleからポータルのベンチを1回実行します。
-計測中もデプロイロックを保持します。設定、Actionsでの自動実行、タイムアウト時の復旧は[ベンチ実行手順](docs/benchmark.md)を参照してください。
+`DISCORD_WEBHOOK_URL`を設定すると、ベンチ結果もDiscordへ通知します。計測中もデプロイロックを保持します。設定、Actionsでの自動実行、タイムアウト時の復旧は[ベンチ実行手順](docs/benchmark.md)を参照してください。
 
 ## 日常の流れ
 

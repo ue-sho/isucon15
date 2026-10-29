@@ -37,6 +37,7 @@ jobs:
           PORTAL_TARGET_ID: ${{ vars.PORTAL_TARGET_ID }}
           PORTAL_COOKIE: ${{ secrets.PORTAL_COOKIE }}
           PORTAL_CSRF_TOKEN: ${{ secrets.PORTAL_CSRF_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           git switch -C "$PR_BRANCH" "$REV"
           task bench BRANCH="$PR_BRANCH" 2>&1 | tee "$RUNNER_TEMP/benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"

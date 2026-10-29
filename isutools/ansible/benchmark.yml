@@ -18,6 +18,20 @@
       ansible.builtin.debug:
         msg: "{{ portal_bench.stdout_lines + portal_bench.stderr_lines }}"
 
+    - name: Notify Discord of the benchmark result
+      ansible.builtin.command:
+        argv:
+          - bash
+          - "{{ playbook_dir }}/../scripts/notify.sh"
+          - |-
+            ▶ benchmark: {{ 'success' if portal_bench.rc == 0 else 'failed' }}
+            ▶ branch: {{ lookup('env', 'ISUTOOLS_BENCH_BRANCH') }} ({{ lookup('env', 'ISUTOOLS_BENCH_REV') }})
+            {{ portal_bench.stdout_lines | last | default('結果なし', true) }}
+            {{ portal_bench.stderr }}
+            {{ portal_bench.stdout_lines[:-1][-8:] | join('\n') }}
+      changed_when: true
+      failed_when: false # 通知失敗はベンチ自体の成否に影響させない
+
     - name: Require a successful benchmark result
       ansible.builtin.assert:
         that: portal_bench.rc == 0

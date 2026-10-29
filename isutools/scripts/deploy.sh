@@ -111,5 +111,5 @@ esac
 if [ "$benchmark" = true ]; then
   bench_state="$logdir/benchmark-state.json"
   isu_info "Ansible でポータルベンチを実行（完了までデプロイロックを保持）"
-  (cd "$ISUTOOLS_DIR/ansible" && ISUTOOLS_BENCH_STATE="$bench_state" ansible-playbook benchmark.yml)
+  (cd "$ISUTOOLS_DIR/ansible" && ISUTOOLS_BENCH_STATE="$bench_state" ISUTOOLS_BENCH_BRANCH="$branch" ISUTOOLS_BENCH_REV="$sha" ansible-playbook benchmark.yml)
 fi
