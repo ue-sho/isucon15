@@ -65,6 +65,16 @@ class RemoteDeployTests(Sandbox):
         self.assertIn('systemctl restart isuapp-node.service', self.calls())
         self.assertNotIn('systemctl restart mysql', self.calls())
 
+    def test_copies_nginx_symlinks(self):
+        write(self.work / 's1/etc/nginx/sites-available/app.conf', 'server {}\n')
+        link = self.work / 's1/etc/nginx/sites-enabled/app.conf'
+        link.parent.mkdir(parents=True)
+        link.symlink_to('../sites-available/app.conf')
+        self.deploy()
+        copied = self.hosts / 's1/etc/nginx/sites-enabled/app.conf'
+        self.assertTrue(copied.is_symlink())
+        self.assertEqual(copied.read_text(), 'server {}\n')
+
     def test_respects_manual_profiling_service_state(self):
         self.deploy()
         self.assertNotIn('systemctl restart pprotein', self.calls())
@@ -79,6 +89,22 @@ class RemoteDeployTests(Sandbox):
     def test_truncates_logs(self):
         self.deploy()
         self.assertEqual((self.logs / 'nginx/access.log').stat().st_size, 0)
+        self.assertEqual((self.logs / 'mysql/slow.log').stat().st_size, 0)
+
+    def test_log_checks_do_not_stat_as_unprivileged_user(self):
+        from unittest.mock import patch
+        from isutools.lib.remote import remote_deploy
+        original = Path.exists
+
+        def exists(path):
+            if path in [self.logs / 'nginx/access.log', self.logs / 'mysql/slow.log']:
+                raise PermissionError(str(path))
+            return original(path)
+
+        config = self.config(ISUTOOLS_SUDO='', PATH=str(ROOT / 'isutools/tests/helpers/stubs') + ':' + self.env['PATH'],
+                             FAKE_HOST='s1', ISUTOOLS_ROOT=str(self.work), ISUTOOLS_ETC=str(self.hosts / 's1/etc'))
+        with patch.object(Path, 'exists', exists):
+            self.assertEqual(remote_deploy(config, 's1'), 0)
         self.assertEqual((self.logs / 'mysql/slow.log').stat().st_size, 0)
 
     def test_first_boot_without_logs_env_or_record(self):

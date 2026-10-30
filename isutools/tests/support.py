@@ -45,11 +45,11 @@ class Sandbox(unittest.TestCase):
 
     def make_repo(self, root):
         shutil.copytree(ROOT / 'isutools', root / 'isutools', dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns('tests', 'node_modules', '__pycache__', '.bootstrap'))
+                        ignore=shutil.ignore_patterns('tests', 'node_modules', '__pycache__', '.bootstrap', 'initial-state.json'))
         shutil.copy(ROOT / '.gitignore', root / '.gitignore')
         shutil.copy(ROOT / 'Taskfile.yml', root / 'Taskfile.yml')
         path = root / 'isutools/config.env'
-        path.write_text(path.read_text().replace('isuxxx-node.service', 'isuapp-node.service'))
+        path.write_text(path.read_text() + '\nAPP_SERVICE=isuapp-node.service\nAPP_DIR=webapp/nodejs\n')
         write(root / 'isutools/hosts.env', 'S1_IP=10.0.0.1\nS2_IP=10.0.0.2\nS3_IP=10.0.0.3\n')
 
     def config(self, root=None, **values):

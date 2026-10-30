@@ -43,7 +43,7 @@ def remote_deploy(config, host):
         print(f'[{host}] /etc に設定を配置', flush=True)
         etc = root / host / 'etc'
         if etc.is_dir():
-            config.sudo('rsync', '-r', '--exclude=debian.cnf', str(etc) + '/', str(config.etc) + '/')
+            config.sudo('rsync', '-rl', '--exclude=debian.cnf', str(etc) + '/', str(config.etc) + '/')
         step = 'env-files'
         env_files = root / host / 'home/isucon'
         if env_files.is_dir():
@@ -79,7 +79,7 @@ def remote_deploy(config, host):
         step = 'truncate'
         for key in ['NGINX_LOG', 'SLOW_LOG']:
             log = Path(config.require(key))
-            if log.exists():
+            if config.sudo('test', '-e', log, check=False).returncode == 0:
                 config.sudo('truncate', '-s', '0', log)
                 config.sudo('chmod', '+r', log)
                 config.sudo('chmod', '+rx', log.parent)

@@ -80,7 +80,7 @@
       become: false
       delegate_to: localhost
       ansible.builtin.copy:
-        content: "{{ ansible_default_ipv4.address }}\n"
+        content: "{{ ansible_facts['default_ipv4']['address'] }}\n"
         dest: "{{ out }}/ip"
         mode: "0644"
 

@@ -3,9 +3,10 @@
 //   GET /debug/pprof/profile?seconds=N → @datadog/pprof の time profile（gzip 済み pprof 形式）
 // アプリを絶対に落とさないこと: 失敗はすべて console.error に出して諦める。
 
-// npm / npx / pnpm / yarn / tsx / ts-node / nodemon は NODE_OPTIONS を引き継いだ子プロセスでアプリを動かす。
+// npm / npx / pnpm / yarn / tsx / nodemon は NODE_OPTIONS を引き継いだ子プロセスでアプリを動かす。
+// ts-node は同じプロセスでアプリを動かすため、除外しない。
 // ランチャーがポートを取ると本物のアプリを計測できないため、ランチャーでは待ち受けない。
-const LAUNCHER = /(?:^|[\\/])(?:(?:npm|npx)(?:-cli)?|pnpm|yarn)(?:\.c?js)?$|[\\/](?:tsx|ts-node|nodemon|pnpm|yarn)[\\/]/;
+const LAUNCHER = /(?:^|[\\/])(?:(?:npm|npx)(?:-cli)?|pnpm|yarn)(?:\.c?js)?$|[\\/](?:tsx|nodemon|pnpm|yarn)[\\/]/;
 
 try {
   if (LAUNCHER.test(process.argv[1] || '')) throw Object.assign(new Error('launcher'), { skip: true });

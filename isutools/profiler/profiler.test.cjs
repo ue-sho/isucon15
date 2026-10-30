@@ -35,6 +35,26 @@ async function waitListening(port) {
 
 const alive = (child) => child.exitCode === null && child.signalCode === null;
 
+test('profiles the application running inside ts-node', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'isutools-ts-node-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const script = path.join(dir, 'node_modules', 'ts-node', 'dist', 'bin.js');
+  fs.mkdirSync(path.dirname(script), { recursive: true });
+  fs.writeFileSync(script, 'setInterval(() => {}, 1000)\n');
+  const port = nextPort++;
+  const app = spawn(process.execPath, ['--require', PROFILER, script], {
+    env: { ...process.env, ISUTOOLS_PROFILER_PORT: String(port) },
+    stdio: 'ignore',
+  });
+  t.after(() => app.kill());
+  await waitListening(port);
+  const res = await fetch(`http://127.0.0.1:${port}/debug/pprof/profile?seconds=1`);
+  assert.strictEqual(res.status, 200);
+  const body = Buffer.from(await res.arrayBuffer());
+  assert.strictEqual(body[0], 0x1f);
+  assert.strictEqual(body[1], 0x8b);
+});
+
 test('serves gzip pprof profile', async (t) => {
   const port = nextPort++;
   const app = startApp(PROFILER, port);
