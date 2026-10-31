@@ -84,7 +84,13 @@
         dest: "{{ out }}/ip"
         mode: "0644"
 
+    - name: Check optional MySQL configuration directory
+      ansible.builtin.stat:
+        path: /etc/mysql
+      register: mysql_config
+
     - name: Pull /etc/nginx and /etc/mysql
+      when: item != 'mysql' or (mysql_config.stat.isdir | default(false))
       ansible.posix.synchronize:
         mode: pull
         src: "/etc/{{ item }}/"

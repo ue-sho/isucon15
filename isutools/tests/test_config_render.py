@@ -67,8 +67,10 @@ class RenderTests(unittest.TestCase):
         import shutil
         shutil.copytree(ROOT / 'isutools/templates', self.root / 'isutools/templates')
         values = read_env(ROOT / 'isutools/config.env')
-        values.update(APP_SERVICE='isuapp-node.service', S1_IP='10.0.0.1', S2_IP='10.0.0.2', S3_IP='10.0.0.3')
+        values.update(HOSTS='s1 s2 s3', PPROTEIN_HOST='s3', APP_SERVICE='isuapp-node.service', S1_IP='10.0.0.1', S2_IP='10.0.0.2', S3_IP='10.0.0.3')
         self.config = Config(self.root, values)
+        for host in self.config.hosts:
+            (self.root / host / "etc/mysql").mkdir(parents=True)
 
     def text(self, path):
         return (self.root / path).read_text()
@@ -90,6 +92,15 @@ class RenderTests(unittest.TestCase):
                 agent = self.text(f'{host}/etc/systemd/system/pprotein-agent.service')
                 self.assertIn('PPROTEIN_HTTPLOG=/var/log/nginx/access.log', agent)
                 self.assertIn('SupplementaryGroups=adm mysql', agent)
+
+    def test_host_without_mysql_does_not_get_mysql_settings_or_group(self):
+        (self.root / 's1/etc/mysql').rmdir()
+        render_all(self.config)
+        self.assertFalse((self.root / 's1/etc/mysql').exists())
+        agent = self.text('s1/etc/systemd/system/pprotein-agent.service')
+        self.assertIn('SupplementaryGroups=adm\n', agent)
+        self.assertNotIn('adm mysql', agent)
+        self.assertTrue((self.root / 's2/etc/mysql/conf.d/zz-isutools-slowlog.cnf').exists())
 
     def test_pprotein_service_moves_to_selected_host(self):
         render_all(self.config)
@@ -117,7 +128,7 @@ class RenderTests(unittest.TestCase):
         del self.config.values['S3_IP']
         with self.assertRaisesRegex(ToolError, 'hosts.env'):
             render_all(self.config)
-        self.assertFalse((self.root / 's1').exists())
+        self.assertFalse((self.root / 's1/etc/systemd').exists())
 
     def test_slowlog_uses_last_included_directory_and_removes_stale_config(self):
         render_all(self.config)

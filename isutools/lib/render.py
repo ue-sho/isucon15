@@ -27,20 +27,22 @@ def render_all(config):
         template('nginx-log.conf', etc / 'nginx/conf.d/isutools-log.conf',
                  ACCESS_LOG=f'access_log {config.require("NGINX_LOG")} isutools_ltsv;')
         mysql = etc / 'mysql'
-        directories = ['mariadb.conf.d', 'mysql.conf.d', 'conf.d']
-        selected = next((name for name in directories if (mysql / name).is_dir()), 'conf.d')
-        for name in directories:
-            if name != selected:
-                (mysql / name / 'zz-isutools-slowlog.cnf').unlink(missing_ok=True)
-        template('mysql-slowlog.cnf', mysql / selected / 'zz-isutools-slowlog.cnf',
-                 SLOWLOG_SETTINGS=f'slow_query_log=1\nslow_query_log_file={config.require("SLOW_LOG")}\nlong_query_time=0')
+        if mysql.is_dir():
+            directories = ['mariadb.conf.d', 'mysql.conf.d', 'conf.d']
+            selected = next((name for name in directories if (mysql / name).is_dir()), 'conf.d')
+            for name in directories:
+                if name != selected:
+                    (mysql / name / 'zz-isutools-slowlog.cnf').unlink(missing_ok=True)
+            template('mysql-slowlog.cnf', mysql / selected / 'zz-isutools-slowlog.cnf',
+                     SLOWLOG_SETTINGS=f'slow_query_log=1\nslow_query_log_file={config.require("SLOW_LOG")}\nlong_query_time=0')
         systemd = etc / 'systemd/system'
         template('app-dropin.conf', systemd / (config.require('APP_SERVICE') + '.d/isutools.conf'),
                  APP_ENV='Environment=PPROTEIN_ENABLED=1\n'
                  f'Environment=PPROTEIN_URL=http://{ips[pprotein]}:9000\n'
                  'Environment="NODE_OPTIONS=--require /home/isucon/isutools/profiler/profiler.cjs"')
         template('pprotein-agent.service', systemd / 'pprotein-agent.service',
-                 NGINX_LOG=config.require('NGINX_LOG'), SLOW_LOG=config.require('SLOW_LOG'))
+                 NGINX_LOG=config.require('NGINX_LOG'), SLOW_LOG=config.require('SLOW_LOG'),
+                 LOG_GROUPS='adm mysql' if mysql.is_dir() else 'adm')
         if host == pprotein:
             template('pprotein.service', systemd / 'pprotein.service')
         else:
