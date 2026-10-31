@@ -104,6 +104,8 @@ CREATE TABLE login_sessions (
   reason text
 );
 
+CREATE INDEX login_sessions_active_token_idx ON login_sessions(token_hash) WHERE active = true;
+
 CREATE TABLE administrator_sessions (
   id varchar(36) PRIMARY KEY,
   administrator_id varchar(36) NOT NULL REFERENCES administrators(id) ON DELETE RESTRICT,
@@ -171,6 +173,7 @@ CREATE TABLE posts (
 );
 CREATE INDEX posts_author_id ON posts(author_id);
 CREATE INDEX posts_posting_window_id ON posts(posting_window_id);
+CREATE INDEX posts_active_author_window_idx ON posts(author_id,posting_window_id) WHERE deleted_at IS NULL;
 
 CREATE TABLE friend_requests (
   id varchar(36) PRIMARY KEY,
