@@ -43,7 +43,7 @@ export function getFeedHandler(h: HandlerContext): Handler<Env> {
     if (ranked && (input.beforeScore === null) !== (input.beforeId === "")) {
       throw new APIError(400, "invalid_pagination");
     }
-    const viewer = await loadViewerContext(h.db, getSession(c)!.userID);
+    const viewer = await loadViewerContext(h.db, getSession(c)!.userID, { requirePostedToday: true });
     if (!viewer) {
       const response: GetFeedResponse = { items: [], hasMore: false };
       return jsonResponse(c, 200, response);
