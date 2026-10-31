@@ -1,0 +1,22 @@
+# Optional template. Installation, service start and network access require
+# coordinating the target hosts and timing; existing deploy does not use this.
+[Unit]
+Description=ISUReal image authorization Redis
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=redis
+Group=redis
+StateDirectory=isureal-image-redis
+StateDirectoryMode=0700
+ExecStart=/usr/bin/redis-server /etc/isureal-image-redis/redis.conf
+Restart=on-failure
+RestartSec=1
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

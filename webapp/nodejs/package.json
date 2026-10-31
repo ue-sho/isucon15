@@ -15,7 +15,8 @@
     "hono": "4.13.14",
     "jpeg-js": "0.4.4",
     "jszip": "3.10.2",
-    "pg": "8.23.1"
+    "pg": "8.23.1",
+    "redis": "6.3.1"
   },
   "devDependencies": {
     "@types/node": "26.6.5",

@@ -11,11 +11,12 @@ import { apiErrorHandler } from "../../src/api_error.ts";
 import type { DB } from "../../src/db.ts";
 import { getImageHandler } from "../../src/image_api.ts";
 import type { ImageFiles } from "../../src/image_files.ts";
+import type { ImageAuthorizationCache } from "../../src/image_authorization_cache.ts";
 import type { Env, HandlerContext } from "../../src/server.ts";
 
-export async function imageNginx(db: DB, imageFiles: ImageFiles) {
+export async function imageNginx(db: DB, imageFiles: ImageFiles, imageAuthorizationCache?: ImageAuthorizationCache) {
   const app = new Hono<Env>().onError(apiErrorHandler);
-  app.get("/api/images/:imageId", getImageHandler({ db, imageFiles } as HandlerContext));
+  app.get("/api/images/:imageId", getImageHandler({ db, imageFiles, imageAuthorizationCache, config: { imageAuthorizationCacheReads: true } } as HandlerContext));
   const backend = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 });
   if (!backend.listening) await new Promise<void>((resolve) => backend.once("listening", resolve));
   const address = backend.address();

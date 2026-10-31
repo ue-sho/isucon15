@@ -43,6 +43,12 @@ export class ImageFiles {
     catch { return false; }
   }
 
+  fromURI(uri: string): ImageFileRef | undefined {
+    const relative = uri.match(/^\/_isureal_images\/((?:initial|runtime\/[0-9a-f-]{36})\/([0-9a-f]{2})\/([0-9a-f]{64})\.(?:jpg|png))$/);
+    if (!relative || relative[2] !== relative[3].slice(0, 2)) return undefined;
+    return { uri, path: join(this.directory, relative[1]) };
+  }
+
   // 一括書き出し専用。全ファイルの内容をsyncfsしてからrenameする。
   // 同期前のファイルは.tmpなので画像APIから参照されない。
   async putBatch(entries: { file: ImageFileRef; data: Uint8Array<ArrayBuffer> }[]): Promise<void> {

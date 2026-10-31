@@ -45,6 +45,20 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
 
+    // An exact URL was already fully verified. Redis atomically checks the
+    // current global/owner epochs and mutation gates on every hit.
+    const authorization = h.config?.imageAuthorizationCacheReads && h.imageFiles && h.imageAuthorizationCache
+      ? await h.imageAuthorizationCache.lookup(input.imageId, input.exp, input.sig) : undefined;
+    if (authorization?.image) {
+      const file = h.imageFiles!.fromURI(authorization.image.uri);
+      if (file && await h.imageFiles!.has(file)) {
+        if (exp <= unix(Temporal.Now.instant())) throw new APIError(403, "image_forbidden");
+        c.header("Content-Type", authorization.image.mediaType);
+        c.header("X-Accel-Redirect", file.uri);
+        return c.body(null, 200);
+      }
+    }
+
     const hintKey = JSON.stringify([input.imageId, input.exp, input.sig]);
     const hint = useHint && h.imageFiles ? hints.get(hintKey) : undefined;
     const owner = hint ?? await h.db.get<ImageOwner>(
@@ -70,6 +84,12 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
 
+    // Capture only this owner's epoch before the authoritative validity SQL.
+    // Unrelated writes must not prevent cache admission under sustained load.
+    const authorizationTicket = authorization
+      ? await h.imageAuthorizationCache!.snapshot(authorization, owner.owner_user_id) : undefined;
+    const verifyOwnerVersion = Boolean(hint || authorizationTicket);
+
     const file = h.imageFiles?.reference(owner.image_file_generation, input.imageId, owner.owner_user_id, owner.created_at, owner.image_version, owner.media_type);
     const cached = file !== undefined && await h.imageFiles!.has(file);
 
@@ -94,14 +114,14 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
      )
    )
    ${h.imageFiles ? "AND (SELECT image_cache_generation FROM initial_data_boundary) = $4 AND i.xmin::text = $5" : ""}
-   ${hint ? `AND encode(sha256(convert_to(u.secret_key_hash, 'UTF8')), 'hex') = $6
+   ${verifyOwnerVersion ? `AND encode(sha256(convert_to(u.secret_key_hash, 'UTF8')), 'hex') = $6
      AND (SELECT generation::text FROM image_signature_cache_state WHERE singleton) = $7` : ""}
   `,
       input.imageId,
       owner.created_at,
       owner.owner_user_id,
       ...(h.imageFiles ? [owner.image_cache_generation, owner.image_version] : []),
-      ...(hint ? [createHash("sha256").update(owner.secret_key_hash).digest("hex"), owner.signature_cache_generation] : []),
+      ...(verifyOwnerVersion ? [createHash("sha256").update(owner.secret_key_hash).digest("hex"), owner.signature_cache_generation] : []),
     );
     if (!object) {
       // 更新・初期化・鍵変更時はヒントを捨て、現在のDBから通常経路で再取得。
@@ -117,6 +137,11 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
     // cachedなら必ずfileがあり、下のredirect経路で返す。本体の復元は未命中時だけ。
     const data = cached ? null : Buffer.from(object.data_base64!, "base64");
     if (file && (cached || await h.imageFiles!.put(file, data!))) {
+      if (authorizationTicket) {
+        await h.imageAuthorizationCache!.publish(authorizationTicket, {
+          uri: file.uri, mediaType: object.media_type,
+        }, exp);
+      }
       if (exp <= unix(Temporal.Now.instant())) throw new APIError(403, "image_forbidden");
       c.header("Content-Type", object.media_type);
       c.header("X-Accel-Redirect", file.uri);

@@ -70,3 +70,54 @@ ssh asia1 'sudo systemd-run --wait --pipe --collect --unit=isureal-image-export 
 戻し方: このブランチの画像API・画像ファイル処理の変更を戻す。DB migrationやnginx設定の追加変更は不要。
 
 GitHub CLIが未認証のためIssueへの転記は未実施。
+
+## Redisで検証済み画像URLを共有する（2026-10-31）
+
+作業ブランチ: `perf/image-authorization-redis`。基点は `5b7361f`。Issue #37の追加改善案で、本番反映・ベンチは未実施。ユーザーからRedis依存の追加とローカル実装・検証の許可を得ている。
+
+### 通常経路と整合性
+
+`ISUREAL_IMAGE_AUTH_REDIS_URL` を設定すると、画像の状態を変えるAPIにRedisの無効化処理を追加する。`ISUREAL_IMAGE_AUTH_CACHE_READS=1` も設定したファイル配信アプリだけが、検証済みURLを再利用する。両方とも既定では無効。
+
+- 画像ID・expの文字列・sigの完全な組のSHA-256をキーにする。共有するのは配信URI・MIME・所有者スコープ・無効化世代で、秘密鍵・画像本体は保存しない。成功した検証だけを、最大60秒かつURLの期限まで登録する。命中ごとにRedisが現在の所有者・全体の世代と更新中マーカーをLuaで照合する。命中時は署名の反復計算と画像SQLを省き、ローカルファイルを確認して `X-Accel-Redirect` を返す。パラメータ形式・重複・期限・返却直前の期限は毎回検証する。
+- 未登録・失効・Redisエラー・ファイルなしは従来のDB検証へ戻す。DB検証前に所有者と全体の世代を取得し、登録時にも一致を要求する。所有者検索と世代取得の間の鍵変更も、検証SQLで鍵のSHA-256・署名キャッシュ世代を再照合して拒否する。無関係な所有者の更新が続いていても登録できる。
+- プロフィール画像変更・削除、RealMoji差し替えは所有者単位で無効化する。退会・投稿編集・投稿削除・RealMoji削除・initializeは全体を無効化する。投稿削除や退会が他の所有者のRealMoji画像にも及ぶため、後者を所有者だけに絞らない。投稿作成・新規登録は新しいIDしか生成せず、既存の有効画像を無効にしないため対象外。
+- 更新開始前に永続マーカーを立て、DBのCOMMITまたはROLLBACK完了後に世代をもう一度変更して解除する。同じ所有者の並行更新は件数で管理する。古い検証結果は再登録できない。関係・公開範囲のAPIやフィード等の権限判定は従来のDB処理を維持し、キャッシュする対象を画像GETの既存の有効性判定に限定する。
+- マーカーにTTLを付けない。プロセス停止・結果の確定できない5xxでは残して、該当画像をDB検証へ戻す。Redis停止時は無効化を確認できない画像関連更新を開始せず503にする。通常の起動後の接続断は自動再接続するが、起動時にRedisの設定・初期状態を確認できなければ起動を失敗させる。
+- 「画像SQL 0回」は有効URLとローカルファイルの両方が命中した場合。初回・失効後・ファイル消失時はDBを読む。既存のIP banの定期再読込SQLは別に残る。
+
+画像本体・投稿・ユーザーの永続化の正はPostgreSQLのまま。nginxのinternal設定、ファイル世代、既存の初期画像の再利用も維持する。initializeの全体マーカーと世代変更で全リージョンの過去の判定を失効させ、初期化直前の要求からの再登録も拒否する。
+
+### Redisの配置と切り替え
+
+Redisはasia2への追加を想定するが、CPU・メモリ・ディスクの余力、実アドレス、認証、ポータルの接続先との照合は未実施。`isutools/templates/image-authorization-redis.conf` と同名の `.service` は手動構築用のテンプレートで、既存deployからは配布・有効化しない。実機へのRedis導入、認証設定、ネットワーク設定、サービス切り替えは対象と実施順を合わせてから行う。
+
+1. 専用Redisを構築する。接続は既存ルーター経由の経路を維持し、到達範囲と認証を限定する。テンプレートのbindはloopbackだけであり、照合済みのアプリ向けアドレスを別途設定する。認証情報はGitやコマンド出力に載せない。
+2. `appendonly yes`、`appendfsync always`、`no-appendfsync-on-rewrite no`、`aof-load-truncated no`、`save ""`、`maxmemory-policy noeviction` を維持する。アプリは起動時にこれらを確認する。**Redisは判定のキャッシュだけでなく、更新中マーカーも保持するため、通常の揮発性キャッシュとして扱わない。** AOFの古いバックアップへの巻戻し、マーカーの削除、追い出し、稼働中のFLUSH等は禁止。[Redis公式の永続化説明](https://redis.io/docs/latest/management/persistence/)のとおりalwaysは毎回のfsyncを伴うため、asia2のI/Oへの影響も確認する。
+3. 全画像関連の書き込みを止めた状態で、保護された環境設定からURLを読み込み、空の専用Redisに対して `node src/provision_image_authorization_cache.ts --all-writers-stopped` を一度実行する。非空DBや不適切な設定では拒否し、通常のアプリ起動は状態を新規作成しない。
+4. 全APIプロセスへ同じ新版と同じRedis URLを設定する。最初は全て `ISUREAL_IMAGE_AUTH_CACHE_READS=0` とし、DB検証を続けながら無効化処理だけを有効にする。asia1/europe1/america1のメインだけでなく、地域別APIサービス・asia2など書き込みを受け得る全プロセスを確認する。ファイルキャッシュのないプロセスにもRedis URLは必要。
+5. 旧プロセスと旧DBトランザクションの終了、全ての書き込み経路への無効化処理の反映を確認してから、ファイル配信を行うプロセスで `ISUREAL_IMAGE_AUTH_CACHE_READS=1` を有効にする。混在中にキャッシュから配信しない。
+6. 初期化、画像・退会・差し替え・公開範囲・関係変更・履歴・export・再起動後の取得を確認する。ユーザーが実行する実ベンチで命中率、asia1のCPU、asia2のCPU・メモリ・AOFの書込待ち、画像関連更新のレイテンシと503、得点を比較する。
+
+戻すときは、まず**全ての読み取り側で** `ISUREAL_IMAGE_AUTH_CACHE_READS=0` にしてDB検証へ戻す。その完了後にRedis URLを外して無効化処理を停止できる。キャッシュを読むプロセスが残っている間に、更新側の無効化処理だけを停止しない。
+
+残存マーカーは自動で解除しない。復旧は全書き込みとキャッシュ読み取りを止め、旧DBトランザクションも終了したことを確認した作業時間に限定する。必要な記録を保存し、専用Redisの状態を空に戻す操作の許可を得て再provisionする。画像・投稿の永続データはDBから復元できるが、稼働中に状態を消すだけでは整合性を保証できない。
+
+### ローカル検証
+
+Node.js 26.10.0、使い捨てPostgreSQL 16、Redis 7.4 Alpineで検証。合成データのみを使い、本番には接続していない。
+
+```sh
+cd webapp/nodejs
+IMAGE_AUTH_CPU_BENCH=1 IMAGE_AUTH_NGINX_TEST=1 sh test/helpers/run-image-authorization.sh
+```
+
+スクリプトは専用コンテナを新規作成し、終了時に自分が作ったコンテナとvolumeを破棄する。Node.jsの指定は `IMAGE_AUTH_TEST_NODE=/path/to/node26`。DBやRedisの本番接続設定は受け取らず、既存のデータがある試験用DBも開始前に拒否する。
+
+確認対象: 別worker・3地域の命中時0 SQL、未配置ファイルの再生成、不正署名・期限・重複、プロフィール削除、RealMoji差し替え・削除、投稿削除、投稿者退会、古い結果の再登録競合、鍵変更競合、同じ所有者の並行更新と別所有者の登録、4xx時の解放と5xx時の保留、実reset、アプリ再起動、RedisのSIGKILLからのAOF復旧、接続断時のDB確認と更新拒否、実nginxの本文・内部URL拒否・Range応答。
+
+通常のテスト一式は `node --test --test-concurrency=1 'test/**/*.test.ts'` で102成功・失敗0・15skip。これはRedis導入前からのDB等のopt-in試験を含むskipであり、全ての本番条件の通過を意味しない。並列再実行では既存の `jpeg-decoder` と `pprotein` の2ファイルが失敗し、単独では11件とも成功した。並列時の原因は未確定。追加した専用統合試験は実nginx・CPU比較込みで17成功・失敗0・skip0。型検査と試験スクリプトの構文検査も成功。
+
+合成CPU比較は250要求を1組として順序を交互に5組ずつ測定し、既存の1 SQL経路とRedis命中経路を比較した。NodeプロセスのCPU時間の中央値は108.732ms → 86.189ms（約20.7%減）、経過時間の中央値は243.463ms → 122.188ms。画像SQLは各1,250要求で1,250回 → 0回。URLの生成は計測外、実データは使用していない。Redis・PostgreSQL・nginxプロセスのCPUはこのCPU時間に含まない。raw結果は `/tmp/isu15-image-authorization-final.log`、通常試験は `/tmp/isu15-image-authorization-all-tests.log` に保存し、実環境の低下率として扱わない。
+
+未確認: 本番でのキャッシュ命中率、全APIの実配置、初期化60秒以内、Redis追加後の全体CPU・I/O・得点。CPU比較は同じ有効URLの連続取得に限定した合成計測であり、JPEG検証やフィードの署名生成はこの変更で省略しない。Issue #37/#2への転記はGitHub CLI未認証のため未実施。

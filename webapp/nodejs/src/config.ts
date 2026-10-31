@@ -7,6 +7,8 @@ export type Config = {
   dbName: string;
   logLevel: string;
   imageCacheDir?: string;
+  imageAuthorizationRedisURL?: string;
+  imageAuthorizationCacheReads?: boolean;
 };
 
 export function configFromEnv(): Config {
@@ -19,6 +21,8 @@ export function configFromEnv(): Config {
     dbName: envOrDefault("ISUREAL_DB_NAME", "isureal"),
     logLevel: envOrDefault("ISUREAL_LOG_LEVEL", "debug"),
     imageCacheDir: envOrDefault("ISUREAL_IMAGE_CACHE_DIR", "") || undefined,
+    imageAuthorizationRedisURL: envOrDefault("ISUREAL_IMAGE_AUTH_REDIS_URL", "") || undefined,
+    imageAuthorizationCacheReads: envOrDefault("ISUREAL_IMAGE_AUTH_CACHE_READS", "0") === "1",
   };
 }
 

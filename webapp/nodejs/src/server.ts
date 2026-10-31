@@ -15,6 +15,7 @@ import { getFeedHandler } from "./feed_api.ts";
 import { createFriendRequestHandler, transitionFriendRequestHandler } from "./friend_request_api.ts";
 import { getImageHandler } from "./image_api.ts";
 import { ImageFiles } from "./image_files.ts";
+import { ImageAuthorizationCache, imageCacheMutationMiddleware } from "./image_authorization_cache.ts";
 import { initializeHandler } from "./initialize.ts";
 import { IPBanList, ipBanMiddleware } from "./ip_ban.ts";
 import { getMemoriesByDateHandler, getMemoriesHandler } from "./memory_api.ts";
@@ -37,6 +38,7 @@ export type HandlerContext = {
   config: Config;
   ipBans: IPBanList;
   imageFiles?: ImageFiles;
+  imageAuthorizationCache?: ImageAuthorizationCache;
 };
 
 export type Env = {
@@ -65,15 +67,26 @@ export async function newServer(config: Config, poolSize: number): Promise<Hono<
     throw new Error("failed to ping database: " + errorMessage(err));
   }
 
+  const imageAuthorizationCache = config.imageAuthorizationRedisURL
+    ? new ImageAuthorizationCache(config.imageAuthorizationRedisURL) : undefined;
+  try {
+    await imageAuthorizationCache?.connect();
+  } catch (err) {
+    await db.end();
+    throw err;
+  }
   const handlerContext: HandlerContext = {
     db,
     config,
     ipBans: new IPBanList(),
     imageFiles: config.imageCacheDir ? new ImageFiles(config.imageCacheDir) : undefined,
+    imageAuthorizationCache,
   };
+  const invalidateUserImages = imageCacheMutationMiddleware(handlerContext, "user");
+  const invalidateAllImages = imageCacheMutationMiddleware(handlerContext, "global");
   e.use(ipBanMiddleware(handlerContext));
 
-  e.post("/api/initialize", initializeHandler(handlerContext));
+  e.post("/api/initialize", invalidateAllImages, initializeHandler(handlerContext));
   e.post("/api/auth/register", registerHandler(handlerContext));
   e.post("/api/auth/login", loginHandler(handlerContext));
   e.post("/api/auth/logout", sessionMiddleware(handlerContext, true), logoutHandler(handlerContext));
@@ -82,24 +95,24 @@ export async function newServer(config: Config, poolSize: number): Promise<Hono<
   e.get("/api/me/export", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), exportPostsHandler(handlerContext));
   e.get("/api/me", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), getMeHandler(handlerContext));
   e.patch("/api/me", sessionMiddleware(handlerContext, true), updateMeHandler(handlerContext));
-  e.put("/api/me/profile-image", sessionMiddleware(handlerContext, true), putProfileImageHandler(handlerContext));
-  e.delete("/api/me/profile-image", sessionMiddleware(handlerContext, true), deleteProfileImageHandler(handlerContext));
-  e.post("/api/me/account-deletion", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), deleteAccountHandler(handlerContext));
+  e.put("/api/me/profile-image", sessionMiddleware(handlerContext, true), invalidateUserImages, putProfileImageHandler(handlerContext));
+  e.delete("/api/me/profile-image", sessionMiddleware(handlerContext, true), invalidateUserImages, deleteProfileImageHandler(handlerContext));
+  e.post("/api/me/account-deletion", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), invalidateAllImages, deleteAccountHandler(handlerContext));
   e.post("/api/posts", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), createPostHandler(handlerContext));
   e.get("/api/posting-window/current", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), getCurrentPostingWindowHandler(handlerContext));
   e.get("/api/posts/me/current", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), getMyCurrentPostHandler(handlerContext));
   e.get("/api/posts/:postId", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), getPostHandler(handlerContext));
-  e.patch("/api/posts/:postId", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), updatePostHandler(handlerContext));
-  e.delete("/api/posts/:postId", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), deletePostHandler(handlerContext));
+  e.patch("/api/posts/:postId", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), invalidateAllImages, updatePostHandler(handlerContext));
+  e.delete("/api/posts/:postId", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), invalidateAllImages, deletePostHandler(handlerContext));
   e.get("/api/feeds/:feed", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), getFeedHandler(handlerContext));
   e.get("/api/memories", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), getMemoriesHandler(handlerContext));
   e.get("/api/memories/:date", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), getMemoriesByDateHandler(handlerContext));
   e.post("/api/posts/:postId/comments", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), createCommentHandler(handlerContext));
   e.get("/api/posts/:postId/comments", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), getCommentsHandler(handlerContext));
   e.delete("/api/comments/:commentId", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), deleteCommentHandler(handlerContext));
-  e.post("/api/posts/:postId/realmojis", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), replaceRealMojiHandler(handlerContext));
+  e.post("/api/posts/:postId/realmojis", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), invalidateUserImages, replaceRealMojiHandler(handlerContext));
   e.get("/api/posts/:postId/realmojis", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), getRealMojisHandler(handlerContext));
-  e.delete("/api/realmojis/:realMojiId", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), deleteRealMojiHandler(handlerContext));
+  e.delete("/api/realmojis/:realMojiId", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), invalidateAllImages, deleteRealMojiHandler(handlerContext));
   e.get("/api/images/:imageId", getImageHandler(handlerContext));
   e.get("/api/notifications", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), getNotificationsHandler(handlerContext));
   e.post("/api/friend-requests", sessionMiddleware(handlerContext, true), regionMiddleware(handlerContext), createFriendRequestHandler(handlerContext));
