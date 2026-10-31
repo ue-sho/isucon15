@@ -14,7 +14,7 @@ class RemoteDeployTests(Sandbox):
         self.make_repo(self.work)
         self.logs = self.tmp / 'logs'
         config = self.work / 'isutools/config.env'
-        config.write_text(config.read_text() + f'\nNGINX_LOG={self.logs}/nginx/access.log\nSLOW_LOG={self.logs}/mysql/slow.log\n')
+        config.write_text(config.read_text() + f'\nPROFILING_ENABLED=1\nNGINX_LOG={self.logs}/nginx/access.log\nSLOW_LOG={self.logs}/mysql/slow.log\n')
         write(self.work / 'webapp/nodejs/package-lock.json', '{"lockfileVersion":3}')
         write(self.work / 'isutools/profiler/package-lock.json', '{"lockfileVersion":3,"name":"profiler"}')
         write(self.work / 's1/etc/mysql/debian.cnf', '[client]\n')
@@ -28,6 +28,22 @@ class RemoteDeployTests(Sandbox):
     def deploy(self, check=True):
         command = "DEPLOYER='Alice A' DEPLOY_BRANCH=feature/x python3 -m isutools remote-deploy s1"
         return self.command([self.env['ISUTOOLS_SSH'], 's1', command], check=check)
+
+    def test_profiling_off_stops_collectors_preserves_logs_and_skips_config(self):
+        with (self.work / 'isutools/config.env').open('a') as file:
+            file.write('\nPROFILING_ENABLED=0\nPPROTEIN_HOST=s1\n')
+        write(self.hosts / 's1/enabled', 'nginx\nisuapp-node.service\npprotein-agent.service\npprotein.service\n')
+        result = self.deploy()
+        self.assertIn('ISUTOOLS_RESULT status=ok', result.stdout)
+        calls = self.calls()
+        self.assertIn('systemctl disable --now pprotein-agent.service', calls)
+        self.assertIn('systemctl disable --now pprotein.service', calls)
+        self.assertNotIn('systemctl restart pprotein', calls)
+        self.assertNotIn('127.0.0.1:9000', calls)
+        self.assertNotIn('truncate', calls)
+        self.assertEqual((self.logs / 'nginx/access.log').read_text(), 'access\n')
+        self.assertEqual((self.logs / 'mysql/slow.log').read_text(), 'slow\n')
+        self.assertFalse((self.work / '.isutools/lockhash.profiler').exists())
 
     def test_first_deploy_runs_npm_and_records_deployer(self):
         result = self.deploy()
