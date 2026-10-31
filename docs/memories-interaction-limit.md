@@ -132,7 +132,7 @@ docker stop isucon15-memories-recheck
 
 ## main取り込み後の再検証（2026-10-31）
 
-画像署名キャッシュ・初期化世代管理・51投稿目の署名省略を含むmain `fa082c17ae958fd1a3ff24fa24604a5b1c74b2bc` を取り込み、同じ合成データで再検証した。さらに `2c9e2fd786f4898e484fc29077f3d920ca2cb4d2` のfriendsフィード変更も取り込む。この追加差分はMemories・署名・DBスキーマ・運用ツールを変更していない。以下の計測はfa082c1版の共通処理を使った旧反応SQLと新反応SQLの比較であり、上の初回数値と混ぜない。
+画像署名キャッシュ・初期化世代管理・51投稿目の署名省略を含むmain `fa082c17ae958fd1a3ff24fa24604a5b1c74b2bc` を取り込み、同じ合成データで再検証した。さらに `2c9e2fd786f4898e484fc29077f3d920ca2cb4d2` のfriendsフィード変更も取り込んだ。この追加差分はMemories・署名・DBスキーマ・運用ツールを変更していない。以下の計測はfa082c1版の共通処理を使った旧反応SQLと新反応SQLの比較であり、上の初回数値と混ぜない。
 
 既存テストの簡易DBはselect/getだけを実装していたため、ラッパー生成時のexec.bindをやめ、get/execを呼ばれた時だけ元DBへ委譲するようにした。共有helperとpage-response.test.tsへの独自変更はない。mainから取り込んだ既存変更は維持した。
 
@@ -154,3 +154,5 @@ fa082c1取り込み後: npm run check成功。page-response・image-signature-ca
 最新結果はGit対象外の `.isutools/memories-interaction-limit/latest-main-comparison.json`。初回データ・計画は `comparison.json` に残した。main統合後も本番分布、共有環境でのDDL・デプロイ・再起動・公式ベンチは未確認・未実施。
 
 本PR固有のDDLはない。ただし取り込んだmainの前提として、image_signature_cache_stateテーブルとinitial_data_boundary.image_cache_generation列が必要。既存の適用記録は他変更のdocsを参照し、反映前に存在を読み取り確認する。適用済みmigrationを無条件に再実行しない。
+
+最終main `2c9e2fd` 取り込み後も型検査成功、関連テスト47成功・1 opt-in skip、Memories専用実PGテスト1成功・0skipを確認した（回帰確認は約19秒）。最後の単回API応答比較はキャッシュ状態をそろえた性能ベンチではないため、性能の表には使っていない。最終 `memory_api.ts` のSHA-256は `cc89d9922a202cbe7d1d40aacc7ce2dcc3b2818bf0ea6823d1d643742b1963b2`。
