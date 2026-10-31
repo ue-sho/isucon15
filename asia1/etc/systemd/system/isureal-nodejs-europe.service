@@ -1,0 +1,15 @@
+[Unit]
+Description=ISUReal Europe API near shared PostgreSQL
+After=network-online.target
+Wants=network-online.target
+PartOf=isureal-nodejs.service
+
+[Service]
+User=isucon
+Group=isucon
+WorkingDirectory=/home/isucon/webapp/nodejs
+EnvironmentFile=/home/isucon/env.sh
+# env.shより後で明示し、元の地域・worker数・port設定による上書きを防ぐ。
+ExecStart=/usr/bin/env ISUREAL_REGION=europe ISUREAL_PORT=8081 ISUREAL_WORKERS=1 ISUREAL_DB_POOL_SIZE=2 /home/isucon/local/node/bin/node src/main.ts
+Restart=on-failure
+RestartSec=5

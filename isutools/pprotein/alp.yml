@@ -1,0 +1,18 @@
+# ISUReal: 可変IDを集約する。クエリ文字列はalp標準の扱いで除外する。
+# feeds・relationshipsの種別とfriend-requestsの操作は別々に集計する。
+matching_groups:
+  - '^/api/posts/[^/]+/comments$'
+  - '^/api/posts/[^/]+/realmojis$'
+  - '^/api/admin/users/[^/]+/certification$'
+  - '^/api/friend-requests/[^/]+/accept$'
+  - '^/api/friend-requests/[^/]+/reject$'
+  - '^/api/friend-requests/[^/]+/cancel$'
+  - '^/api/posts/[^/]+$'
+  - '^/api/users/[^/]+$'
+  - '^/api/comments/[^/]+$'
+  - '^/api/realmojis/[^/]+$'
+  - '^/api/images/[^/]+$'
+  - '^/api/memories/[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  - '^/api/friendships/[^/]+$'
+  - '^/api/follows/[^/]+$'
+  - '^/api/blocks/[^/]+$'

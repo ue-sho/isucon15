@@ -5,6 +5,22 @@ import type { User } from "./user.ts";
 export const imageURLLifetime = 24 * 60 * 60;
 const imageSignatureIterations = 1000;
 
+const signatureCacheMaxEntries = 2048;
+const signatureCacheMaxBytes = 2 * 1024 * 1024;
+const signatureCacheMaxKeyLength = 4096;
+const signatureCacheLifetimeMs = 60 * 1000;
+// Budget UTF-16 strings plus a per-entry allowance; V8/Map overhead and RSS
+// are not exactly measurable here and are also bounded by the entry limit.
+const signatureCacheEntryOverhead = 256;
+type SignatureCacheEntry = { signature: string; expiresAt: number; bytes: number };
+const signatureCache = new Map<string, SignatureCacheEntry>();
+let signatureCacheBytes = 0;
+
+function removeCachedSignature(cacheKey: string, entry: SignatureCacheEntry): void {
+  signatureCache.delete(cacheKey);
+  signatureCacheBytes -= entry.bytes;
+}
+
 export function imageSigningKey(secretKeyHash: string): Buffer {
   if (!/^[0-9A-Fa-f]{64}$/.test(secretKeyHash)) {
     throw new Error("invalid image signing key");
@@ -13,9 +29,46 @@ export function imageSigningKey(secretKeyHash: string): Buffer {
 }
 
 export function imageSignature(key: Buffer, imageID: string, exp: number | string): Buffer {
-  let value = Buffer.from(`${exp}:${imageID}`);
+  const expText = String(exp);
+  const expSeconds = Number(expText);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  // Unusual/expired inputs still use the original calculation. This is only
+  // cache admission, never URL validation or expiry normalization.
+  const cacheable = Number.isSafeInteger(expSeconds) && String(expSeconds) === expText && expSeconds > nowSeconds
+    && key.length * 2 + imageID.length + expText.length <= signatureCacheMaxKeyLength;
+  // JSON preserves field boundaries and exact strings, including ':' and
+  // unpaired surrogates. Equal key bytes in different Buffers share an entry.
+  const cacheKey = cacheable ? JSON.stringify([key.toString("hex"), imageID, expText]) : undefined;
+  const now = performance.now();
+  if (cacheKey !== undefined) {
+    const cached = signatureCache.get(cacheKey);
+    if (cached !== undefined) {
+      removeCachedSignature(cacheKey, cached);
+      if (now < cached.expiresAt) {
+        signatureCache.set(cacheKey, cached);
+        signatureCacheBytes += cached.bytes;
+        return Buffer.from(cached.signature, "hex");
+      }
+    }
+  }
+
+  let value = Buffer.from(`${expText}:${imageID}`);
   for (let i = 0; i < imageSignatureIterations; i++) {
     value = createHmac("sha256", key).update(value).digest();
+  }
+  if (cacheKey !== undefined) {
+    // Immutable storage also isolates the cache from mutations through a
+    // returned Buffer's backing ArrayBuffer (including pooled allocations).
+    const signature = value.toString("hex");
+    const bytes = 2 * (cacheKey.length + signature.length) + signatureCacheEntryOverhead;
+    if (bytes > signatureCacheMaxBytes) return value;
+    while (signatureCache.size >= signatureCacheMaxEntries || signatureCacheBytes + bytes > signatureCacheMaxBytes) {
+      const oldest = signatureCache.entries().next().value;
+      if (oldest === undefined) break;
+      removeCachedSignature(oldest[0], oldest[1]);
+    }
+    signatureCache.set(cacheKey, { signature, expiresAt: now + signatureCacheLifetimeMs, bytes });
+    signatureCacheBytes += bytes;
   }
   return value;
 }

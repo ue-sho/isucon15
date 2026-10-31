@@ -60,7 +60,18 @@ def remote_deploy(config, host):
             config.sudo('nginx', '-t')
         step = 'restart'
         config.sudo('systemctl', 'daemon-reload')
-        for service in [config.require('DB_SERVICE'), 'nginx', config.require('APP_SERVICE')]:
+        db_service = config.require('DB_SERVICE')
+        if enabled(db_service):
+            step = 'db-restart'
+            config.sudo('systemctl', 'restart', db_service)
+            step = 'db-health'
+            if config.run(['systemctl', 'is-active', db_service], capture=True, check=False).returncode:
+                config.sudo('journalctl', '-u', db_service, '-n', '20', '--no-pager', check=False)
+                raise ToolError(f'{db_service} が起動していません')
+        else:
+            print(f'▶ {db_service} はこのホストで無効です（再起動していません）')
+        step = 'restart'
+        for service in ['nginx', config.require('APP_SERVICE')]:
             if enabled(service):
                 config.sudo('systemctl', 'restart', service)
         step = 'app-health'
@@ -76,11 +87,30 @@ def remote_deploy(config, host):
         for service in ['pprotein-agent.service', 'pprotein.service']:
             if enabled(service):
                 config.sudo('systemctl', 'restart', service)
+        if host == config.require('PPROTEIN_HOST') and enabled('pprotein.service'):
+            # Type=simpleのrestart完了時点ではHTTP待受がまだ始まっていない場合がある。
+            # 設定POSTは再送せず、読み取りAPIの起動待ちだけを上限付きで再試行する。
+            step = 'pprotein-health'
+            config.run(['curl', '-fsS', '--connect-timeout', '1', '--max-time', '2',
+                        '--retry', '10', '--retry-delay', '1', '--retry-max-time', '15',
+                        '--retry-connrefused', '-o', '/dev/null',
+                        'http://127.0.0.1:9000/api/group/targets'], capture=True)
+            step = 'pprotein-config'
+            for name, endpoint in [('alp', 'httplog'), ('slp', 'slowlog')]:
+                path = config.tools / 'pprotein' / (name + '.yml')
+                if path.is_file():
+                    config.run(['curl', '-fsS', '--max-time', '10', '-X', 'POST',
+                                '-H', 'Content-Type: application/yaml', '--data-binary', '@' + str(path),
+                                f'http://127.0.0.1:9000/api/{endpoint}/config'], capture=True)
         step = 'truncate'
         for key in ['NGINX_LOG', 'SLOW_LOG']:
             log = Path(config.require(key))
             if config.sudo('test', '-e', log, check=False).returncode == 0:
-                config.sudo('truncate', '-s', '0', log)
+                # O_CREATを使うとstickyディレクトリでfs.protected_regularに拒否される。
+                config.sudo('truncate', '--no-create', '-s', '0', log)
+                # PostgreSQLログはpostgresグループ経由で読み、0640を維持する。
+                if key == 'SLOW_LOG' and db_service.startswith('postgresql'):
+                    continue
                 config.sudo('chmod', '+r', log)
                 config.sudo('chmod', '+rx', log.parent)
         step = 'record'

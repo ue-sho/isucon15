@@ -99,15 +99,12 @@ async function listMemories(
     beforeAt,
     beforeID,
   );
-  let items: MemoryPostResponse[] = posts.map((post) => ({
+  const hasMore = posts.length > 50;
+  const items: MemoryPostResponse[] = posts.slice(0, 50).map((post) => ({
     ...newPostResponse(post.post, post.author),
     realmojis: [],
     comments: [],
   }));
-  const hasMore = items.length > 50;
-  if (hasMore) {
-    items = items.slice(0, 50);
-  }
   await loadMemoryInteractions(db, items);
   return { items, hasMore };
 }
@@ -145,8 +142,12 @@ async function loadMemoryInteractions(db: Queryer, items: MemoryPostResponse[]):
 // after active/deleted/replaced filtering, with one SQL per interaction type.
 function memoryPostQueryer(db: Queryer, postIDs: string[], direction: "ASC" | "DESC"): Queryer {
   return {
-    get: db.get.bind(db),
-    exec: db.exec.bind(db),
+    get<T>(sql: string, ...args: unknown[]): Promise<T | undefined> {
+      return db.get<T>(sql, ...args);
+    },
+    exec(sql: string, ...args: unknown[]): Promise<number> {
+      return db.exec(sql, ...args);
+    },
     select<T>(sql: string): Promise<T[]> {
       return db.select<T>(`
         SELECT ranked.* FROM (
