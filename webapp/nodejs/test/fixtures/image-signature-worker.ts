@@ -24,11 +24,11 @@ if (!process.send || !Number.isInteger(port) || port < 1 || !Number.isFinite(wal
 Date.now = () => wall;
 Temporal.Now.instant = () => Temporal.Instant.fromEpochMilliseconds(wall);
 let hmacCalls = 0;
-const originalHmac = crypto.createHmac;
-crypto.createHmac = (...args: Parameters<typeof crypto.createHmac>) => {
-  hmacCalls++;
-  return originalHmac(...args);
-};
+const originalHash = crypto.hash;
+crypto.hash = ((...args: Parameters<typeof crypto.hash>) => {
+  hmacCalls += 0.5;
+  return originalHash(...args);
+}) as typeof crypto.hash;
 syncBuiltinESMExports();
 
 class ObservedDB extends DB {

@@ -90,11 +90,12 @@ for (const kind of ["memories", "date", "comments", "realmojis", "relationships"
       t.mock.method(Date, "now", () => future);
       const { app, path, records } = setup(kind, count, kind === "feed" || kind === "ranked");
       const realCreateHmac = crypto.createHmac;
+      const realHash = crypto.hash;
       let calls = 0;
-      crypto.createHmac = (...args: Parameters<typeof crypto.createHmac>) => {
-        calls++;
-        return realCreateHmac(...args);
-      };
+      crypto.hash = ((...args: Parameters<typeof crypto.hash>) => {
+        calls += 0.5;
+        return realHash(...args);
+      }) as typeof crypto.hash;
       syncBuiltinESMExports();
       try {
         const response = await app.request(path);
@@ -120,7 +121,7 @@ for (const kind of ["memories", "date", "comments", "realmojis", "relationships"
           }
         }
       } finally {
-        crypto.createHmac = realCreateHmac;
+        crypto.hash = realHash;
         syncBuiltinESMExports();
       }
     });
