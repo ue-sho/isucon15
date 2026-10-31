@@ -11,9 +11,50 @@ import { getMemoriesHandler, getMemoriesByDateHandler } from "../src/memory_api.
 import { getRealMojisHandler } from "../src/realmoji_api.ts";
 import { getRelationshipsHandler } from "../src/relationship_list_api.ts";
 import type { Env, HandlerContext } from "../src/server.ts";
+import { searchUsersHandler } from "../src/user_read_api.ts";
 
 const stamp = Temporal.Instant.from("2026-10-31T02:00:00Z");
 const secret = "ab".repeat(32);
+
+for (const count of [0, 49, 50, 51]) {
+  test(`search: ${count}件の適格行だけでページを作り、51件目を署名しない`, async () => {
+    const rows: Row[] = Array.from({ length: count }, (_, i) => ({
+      ...user(`user-${i}`), username: `user-${i}`, display_name: "Ｃafé", account_type: i % 2 ? "normal" : "certified_public",
+    }));
+    const app = new Hono<Env>();
+    app.onError(apiErrorHandler);
+    app.use("*", async (c, next) => {
+      c.set("session", { userID: "viewer", region: "asia", token: "", tokenHash: "", createdAt: stamp });
+      await next();
+    });
+    const db = {
+      select: async (sql: string) => sql.includes("FROM block_relations")
+        ? [{ id: "blocked" }]
+        : [user("unmatched"), { ...user("blocked"), display_name: "Ｃafé" }, ...rows],
+    };
+    app.get("/search", searchUsersHandler({ db } as unknown as HandlerContext));
+    const realHash = crypto.hash;
+    let calls = 0;
+    crypto.hash = ((...args: Parameters<typeof crypto.hash>) => {
+      calls++;
+      return realHash(...args);
+    }) as typeof crypto.hash;
+    syncBuiltinESMExports();
+    try {
+      // Canonical composition/case folding must remain identical to the original search.
+      const response = await app.request("/search?q=" + encodeURIComponent("ｃAFE\u0301"));
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.hasMore, count > 50);
+      assert.deepEqual(body.items.map((item: any) => item.id), rows.slice(0, 50).map(row => row.id));
+      assert.equal(calls, Math.min(count, 50) * 2000);
+      for (const item of body.items) assert.equal(item.bio, item.accountType === "certified_public" ? "bio" : "");
+    } finally {
+      crypto.hash = realHash;
+      syncBuiltinESMExports();
+    }
+  });
+}
 function user(id: string, prefix = ""): Row {
   return Object.fromEntries(Object.entries({ id, username: id, secret_key_hash: secret, display_name: id, bio: "bio", profile_image_id: `profile-${id}`, region: "asia", account_type: "normal", status: "active" }).map(([k, v]) => [prefix + k, v]));
 }

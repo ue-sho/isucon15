@@ -43,27 +43,26 @@ export function searchUsersHandler(h: HandlerContext): Handler<Env> {
     );
     const blocked = await getBlockedUserIDs(h.db, viewer);
     const query = normalizeSearchText(input.q);
-    let items: RelationshipUserResponse[] = [];
+    const items: RelationshipUserResponse[] = [];
+    let hasMore = false;
     for (const row of rows) {
+      if (blocked.has(row.id)) {
+        continue;
+      }
+      if (!normalizeSearchText(row.username).includes(query) && !normalizeSearchText(row.display_name).includes(query)) {
+        continue;
+      }
+      // The extra eligible row only determines pagination; it needs no image signature.
+      if (items.length === 50) {
+        hasMore = true;
+        break;
+      }
       const user = userFromRow(row);
-      if (!normalizeSearchText(user.username).includes(query) && !normalizeSearchText(user.displayName).includes(query)) {
-        continue;
-      }
-      if (blocked.has(user.id)) {
-        continue;
-      }
       setImageKey(user);
       if (user.accountType !== "certified_public") {
         user.bio = "";
       }
       items.push(newRelationshipUserResponse(user));
-      if (items.length === 51) {
-        break;
-      }
-    }
-    const hasMore = items.length > 50;
-    if (hasMore) {
-      items = items.slice(0, 50);
     }
     const response: SearchUsersResponse = { items, hasMore };
     return jsonResponse(c, 200, response);
