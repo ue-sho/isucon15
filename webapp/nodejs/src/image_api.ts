@@ -2,8 +2,9 @@ import { timingSafeEqual } from "node:crypto";
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind, parseQuery, rawQuery } from "./bind.ts";
-import { imageSignature, imageSigningKey } from "./image_signature.ts";
+import { imageSignature, imageSigningKey, withImageSignatureCacheGeneration } from "./image_signature.ts";
 import { blobResponse } from "./response.ts";
+import { imageFileGenerationSQL } from "./image_files.ts";
 import { unix } from "./time.ts";
 import type { Env, HandlerContext } from "./server.ts";
 
@@ -40,10 +41,14 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
 
-    const owner = await h.db.get<{ secret_key_hash: string; owner_user_id: string; created_at: Temporal.Instant }>(
+    const owner = await h.db.get<{ secret_key_hash: string; owner_user_id: string; created_at: Temporal.Instant; image_version: string; image_cache_generation: string; image_file_generation: string; media_type: string; signature_cache_generation: string }>(
       `
-   SELECT u.secret_key_hash, i.owner_user_id, i.created_at
+   SELECT u.secret_key_hash, i.owner_user_id, i.created_at,
+     (SELECT generation::text FROM image_signature_cache_state WHERE singleton) AS signature_cache_generation
+   ${h.imageFiles ? ` , i.xmin::text AS image_version, b.image_cache_generation, i.media_type, ${imageFileGenerationSQL} AS image_file_generation` : ""}
+
    FROM image_objects i JOIN users u ON u.id = i.owner_user_id
+   ${h.imageFiles ? "CROSS JOIN initial_data_boundary b" : ""}
    WHERE i.id = $1 AND u.status = 'active'
   `,
       input.imageId,
@@ -52,16 +57,21 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
     const key = imageSigningKey(owner.secret_key_hash);
-    if (!timingSafeEqual(sig, imageSignature(key, input.imageId, input.exp))) {
+    const expected = withImageSignatureCacheGeneration(owner.signature_cache_generation,
+      () => imageSignature(key, input.imageId, input.exp));
+    if (!timingSafeEqual(sig, expected)) {
       c.set("abuse", "invalid_signature");
       throw new APIError(403, "image_forbidden");
     }
 
-    // 所有者検索で得た日時でpartitionを絞り、ユーザーもPKで検索する。
+    const file = h.imageFiles?.reference(owner.image_file_generation, input.imageId, owner.owner_user_id, owner.created_at, owner.image_version, owner.media_type);
+    const cached = file !== undefined && await h.imageFiles!.has(file);
+
+    // 命中時も所有者・削除・差し替えをDBで再確認し、byteaだけを取得しない。
     // 削除状態はこのSQLで改めて確認し、署名検証前には画像本体を取得しない。
     const object = await h.db.get<{ data: Uint8Array<ArrayBuffer>; media_type: string }>(
       `
-   SELECT i.data, i.media_type
+   SELECT ${cached ? "NULL::bytea AS data" : "i.data"}, i.media_type
    FROM image_objects i JOIN users u ON u.id = i.owner_user_id AND u.status = 'active'
    WHERE i.id = $1 AND i.created_at = $2 AND u.id = $3 AND (
      u.profile_image_id = i.id
@@ -76,16 +86,24 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
        WHERE r.image_id = i.id AND r.reactor_id = u.id AND r.replaced_at IS NULL AND r.deleted_at IS NULL
      )
    )
+   ${h.imageFiles ? "AND (SELECT image_cache_generation FROM initial_data_boundary) = $4 AND i.xmin::text = $5" : ""}
   `,
       input.imageId,
       owner.created_at,
       owner.owner_user_id,
+      ...(h.imageFiles ? [owner.image_cache_generation, owner.image_version] : []),
     );
     if (!object) {
       throw new APIError(403, "image_forbidden");
     }
     if (exp <= unix(Temporal.Now.instant())) {
       throw new APIError(403, "image_forbidden");
+    }
+    if (file && (cached || await h.imageFiles!.put(file, object.data))) {
+      if (exp <= unix(Temporal.Now.instant())) throw new APIError(403, "image_forbidden");
+      c.header("Content-Type", object.media_type);
+      c.header("X-Accel-Redirect", file.uri);
+      return c.body(null, 200);
     }
     return blobResponse(c, 200, object.media_type, object.data);
   };
