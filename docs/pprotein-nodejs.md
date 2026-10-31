@@ -37,3 +37,27 @@ PostgreSQLのSQL計測は別途対応が必要。登録済みslowlogはMySQL向�
 2026-10-31、依頼により`task pprotein:targets -- split`を実行し、asia2上のpproteinへ`isutools/pprotein/targets.split.json`を登録した。`GET /api/group/targets`でasia1 / europe1 / america1 / asia2の各httplog・slowlog・pprof、計12件の登録を確認。asia1からpproteinへの接続確認も成功した。
 
 これは収集対象の変更であり、ベンチ・初期化・再起動は実行していない。全12対象の収集・解析成功は未確認。PostgreSQLログへのagent切替・解析対応は上記のとおり未実施。元のasia1のみの対象へ戻すには`task pprotein:targets -- single`を実行する。
+
+## デプロイ時のPostgreSQL設定反映
+
+2026-10-31、依頼により`isutools/config.env`の`DB_SERVICE`を`postgresql@16-main.service`へ変更した。asia2で同クラスタが`enabled-runtime`かつ`active`、親の`postgresql.service`も有効で、`start.conf`が`auto`であることを読み取り確認した。
+
+`task deploy`は従来どおりホスト別の`etc/`を配置し、systemdのdaemon-reload後、有効なDBサービスを再起動する。これによりPostgreSQLの追加confも再起動で反映する。無効・未導入のホストではDBを起動しない。クラスタ本体の起動状態を確認し、失敗時はそのホストのアプリ再起動へ進まずエラーにする。DB再起動コマンド自体の失敗もデプロイ失敗として扱う。
+
+この変更はDB設定の差分にかかわらず、有効なクラスタをデプロイごとに再起動する。実環境へのデプロイ・DB再起動は未実施。次回の実行時は担当間で対象と順序を確認する。SQLログの収集先・解析モードは別途対応が必要で、`SLOW_LOG`は今回変更していない。戻す場合は`DB_SERVICE`を以前の値へ戻す（PostgreSQLのconf自体は残る）。
+
+検証：`python3 -m unittest discover -s isutools/tests -p 'test_*.py'`は112件成功。追加テストは設定コピーとDB→アプリの再起動順序、無効なDBのスキップ、DB起動確認失敗時の中断を確認する。実サーバーへの接続や再起動を行わないテスト。[Issue #2への記録](https://github.com/ue-sho/isucon15/issues/2#issuecomment-6537281731)。
+
+## 自動収集が開始されない原因
+
+2026-10-31の読み取り調査で、asia2のpprotein本体・agentはactive、groupターゲット12件も登録済みだった（各DurationはUI等で120秒に変更されていた）。一方、asia1の稼働コミット`a2ec9d6`の`webapp/nodejs/src/initialize.ts`には収集開始関数のimport・呼び出しがない。サービスには`PPROTEIN_ENABLED=1`と`PPROTEIN_URL`が設定済みだが、これだけでは自動収集は始まらない。
+
+修正箇所はinitializeハンドラ。`isutools/snippets/pprotein-collect.ts`の関数をアプリへ組み込み、初期化時に呼び出す必要がある。今回の調査ではアプリ変更・自動収集開始・初期化・デプロイは行っていない。プロファイラの待ち受けとgroupターゲット登録の成功は、自動収集開始の成功とは別である。
+
+### 初期化ハンドラへの組み込み
+
+同日、依頼を受けて`fix/pprotein-initialize`ブランチで修正した。`webapp/nodejs/src/pprotein.ts`に収集スニペットを組み込み、initializeハンドラの先頭からawaitせずに呼び出す。`PPROTEIN_ENABLED=1`の場合のみgroup収集を要求し、HTTPエラー・接続失敗はログに記録する。2秒のタイムアウト・切断を理由に初期化を失敗させない。
+
+検証は`npm run check`と`npm test`（webapp/nodejs内）を実行。型チェックと4件のテストが成功し、有効時の要求、無効時の抑止、応答待ちによるブロックがないこと、接続失敗時にthrowしないことを確認した。依存導入は`npm ci --no-audit --no-fund`で実施。実環境での収集開始・初期化・デプロイは未実行。反映後、次のベンチの初期化でgroupが作成されることを確認する必要がある。
+
+戻す場合はinitializeハンドラの呼び出しを除去するか、`PPROTEIN_ENABLED=0`をサービスに反映する。
