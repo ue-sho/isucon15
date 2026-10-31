@@ -11,6 +11,7 @@ def write(path, text):
 
 def render_all(config):
     hosts = config.hosts
+    profiling = config.get('PROFILING_ENABLED', '1') != '0'
     ips = {host: config.get(host.upper() + '_IP') for host in hosts}
     pprotein = config.require('PPROTEIN_HOST')
     if not ips.get(pprotein) or not all(ips.values()):
@@ -25,7 +26,7 @@ def render_all(config):
     for host in hosts:
         etc = config.root / host / 'etc'
         template('nginx-log.conf', etc / 'nginx/conf.d/isutools-log.conf',
-                 ACCESS_LOG=f'access_log {config.require("NGINX_LOG")} isutools_ltsv;')
+                 ACCESS_LOG=f'access_log {config.require("NGINX_LOG")} isutools_ltsv;' if profiling else 'access_log off;')
         mysql = etc / 'mysql'
         if mysql.is_dir():
             directories = ['mariadb.conf.d', 'mysql.conf.d', 'conf.d']
@@ -34,12 +35,14 @@ def render_all(config):
                 if name != selected:
                     (mysql / name / 'zz-isutools-slowlog.cnf').unlink(missing_ok=True)
             template('mysql-slowlog.cnf', mysql / selected / 'zz-isutools-slowlog.cnf',
-                     SLOWLOG_SETTINGS=f'slow_query_log=1\nslow_query_log_file={config.require("SLOW_LOG")}\nlong_query_time=0')
+                     SLOWLOG_SETTINGS=f'slow_query_log=1\nslow_query_log_file={config.require("SLOW_LOG")}\nlong_query_time=0' if profiling else 'slow_query_log=0')
         systemd = etc / 'systemd/system'
         template('app-dropin.conf', systemd / (config.require('APP_SERVICE') + '.d/isutools.conf'),
                  APP_ENV='Environment=PPROTEIN_ENABLED=1\n'
                  f'Environment=PPROTEIN_URL=http://{ips[pprotein]}:9000\n'
-                 'Environment="NODE_OPTIONS=--require /home/isucon/isutools/profiler/profiler.cjs"')
+                 'Environment="NODE_OPTIONS=--require /home/isucon/isutools/profiler/profiler.cjs"' if profiling else
+                 'Environment=PPROTEIN_ENABLED=0\nEnvironment="NODE_OPTIONS="\n'
+                 'UnsetEnvironment=NODE_OPTIONS PPROTEIN_ENABLED PPROTEIN_URL')
         template('pprotein-agent.service', systemd / 'pprotein-agent.service',
                  NGINX_LOG=config.require('NGINX_LOG'), SLOW_LOG=config.require('SLOW_LOG'),
                  LOG_GROUPS='adm postgres' if (etc / 'postgresql').is_dir()
