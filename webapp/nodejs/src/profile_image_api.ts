@@ -1,18 +1,17 @@
 import { randomUUID } from "node:crypto";
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
-import { decodeJPEG } from "./jpeg.ts";
+import { JPEGDecoder } from "./jpeg_decoder.ts";
 import { noContent } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
 import { getSession } from "./session.ts";
 
-export function putProfileImageHandler(h: HandlerContext): Handler<Env> {
+export function putProfileImageHandler(h: HandlerContext, decoder = new JPEGDecoder()): Handler<Env> {
   return async (c) => {
     if (c.req.header("Content-Type") !== "image/jpeg") {
       throw new APIError(415, "unsupported_media_type");
     }
-    const data = Buffer.from(await c.req.arrayBuffer());
-    const img = decodeJPEG(data);
+    const { data, image: img } = await decoder.decode(() => c.req.arrayBuffer(), c.req.raw.signal);
     if (!img) {
       c.set("abuse", "invalid_image");
       throw new APIError(400, "invalid_profile_image");
