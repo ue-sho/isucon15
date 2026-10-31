@@ -21,6 +21,7 @@ import { getMemoriesByDateHandler, getMemoriesHandler } from "./memory_api.ts";
 import { getNotificationsHandler } from "./notification_api.ts";
 import { createPostHandler, deletePostHandler, getMyCurrentPostHandler, getPostHandler, updatePostHandler } from "./post_api.ts";
 import { getCurrentPostingWindowHandler } from "./posting_window_api.ts";
+import { postTransactionSignature } from "./post_transaction.ts";
 import { deleteProfileImageHandler, putProfileImageHandler } from "./profile_image_api.ts";
 import { deleteRealMojiHandler, getRealMojisHandler, replaceRealMojiHandler } from "./realmoji_api.ts";
 import { regionMiddleware } from "./region.ts";
@@ -37,6 +38,7 @@ export type HandlerContext = {
   config: Config;
   ipBans: IPBanList;
   imageFiles?: ImageFiles;
+  postTransaction?: boolean;
 };
 
 export type Env = {
@@ -70,6 +72,10 @@ export async function newServer(config: Config, poolSize: number): Promise<Hono<
     config,
     ipBans: new IPBanList(),
     imageFiles: config.imageCacheDir ? new ImageFiles(config.imageCacheDir) : undefined,
+    // DDL未適用の環境は従来経路。稼働中の関数エラーで再試行はしない。
+    postTransaction: (await db.get<{ enabled: boolean }>(
+      "SELECT to_regprocedure($1) IS NOT NULL AS enabled", postTransactionSignature,
+    ))?.enabled === true,
   };
   e.use(ipBanMiddleware(handlerContext));
 
