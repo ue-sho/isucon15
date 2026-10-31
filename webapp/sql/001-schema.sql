@@ -82,6 +82,7 @@ CREATE TABLE users (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+CREATE INDEX users_username_id_idx ON users(username,id);
 ALTER TABLE image_objects ADD CONSTRAINT image_objects_owner_fk FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT;
 
 -- 2026-09-10 管理者を消す時のオペレーションはどうすればよいですか？
@@ -121,6 +122,8 @@ CREATE TABLE friendships (
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   UNIQUE(user_low_id,user_high_id)
 );
+
+CREATE INDEX friendships_high_low_idx ON friendships(user_high_id,user_low_id);
 
 CREATE TABLE follows (
   id varchar(36) PRIMARY KEY,
@@ -177,6 +180,9 @@ CREATE TABLE friend_requests (
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL
 );
+
+CREATE INDEX friend_requests_pending_requester_recipient_idx ON friend_requests(requester_id,recipient_id) WHERE status = 'pending';
+CREATE INDEX friend_requests_pending_recipient_requester_idx ON friend_requests(recipient_id,requester_id) WHERE status = 'pending';
 
 CREATE TABLE realmojis (
   id varchar(36) PRIMARY KEY,

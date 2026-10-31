@@ -1,8 +1,8 @@
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
-import { getBlockedUserIDs, getFriendIDs } from "./post.ts";
-import { isBlocked } from "./relationship.ts";
+import { getBlockedUserIDs } from "./post.ts";
+import { isBlocked, isFriend } from "./relationship.ts";
 import type { RelationshipUserResponse } from "./relationship_list_api.ts";
 import { jsonResponse } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
@@ -86,8 +86,7 @@ export function getUserHandler(h: HandlerContext): Handler<Env> {
     if (blocked) {
       throw new APIError(404, "relationship_not_found");
     }
-    const friends = await getFriendIDs(h.db, viewer);
-    if (user.accountType !== "certified_public" && !friends.includes(user.id)) {
+    if (user.accountType !== "certified_public" && !(await isFriend(h.db, viewer, user.id))) {
       user.bio = "";
     }
     return jsonResponse(c, 200, newRelationshipUserResponse(user));
