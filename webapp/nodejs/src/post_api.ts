@@ -90,13 +90,14 @@ export function createPostHandler(h: HandlerContext): Handler<Env> {
     must(await tx.get(`SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE`, userID));
     const user = must(await getUser(tx, userID));
     type WindowRow = { id: string; local_date: string; starts_at: Temporal.Instant };
+    // 投稿同士は共有し、期間終了の UPDATE は COMMIT まで待たせる。
     let window = await tx.get<WindowRow>(
-      `SELECT id, local_date, starts_at FROM posting_windows WHERE region = $1 AND ended_at IS NULL FOR UPDATE`,
+      `SELECT id, local_date, starts_at FROM posting_windows WHERE region = $1 AND ended_at IS NULL FOR SHARE`,
       user.region,
     );
     if (!window) {
       window = await tx.get<WindowRow>(
-        `SELECT id, local_date, starts_at FROM posting_windows WHERE region = $1 AND ended_at IS NULL FOR UPDATE`,
+        `SELECT id, local_date, starts_at FROM posting_windows WHERE region = $1 AND ended_at IS NULL FOR SHARE`,
         user.region,
       );
     }
