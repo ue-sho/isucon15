@@ -1,6 +1,6 @@
 # ISUReal Node.js 実装
 
-`webapp/go` と同じ API を Node.js で実装したものです。
+ISUCON2026の競技サービス「ISUReal」のNode.js実装です。
 
 - Node.js 26 / TypeScript / [Hono](https://hono.dev/) / [node-postgres](https://node-postgres.com/)
 - 依存パッケージは `package.json` と `package-lock.json` で固定しています
@@ -16,8 +16,8 @@
 | `src/*.ts` | ユーザー、投稿、セッションなどの DB の読み書きと共通処理 |
 | `test/` | テスト |
 
-ファイルの分け方とハンドラの名前は `webapp/go` に合わせています（例: `post_api.go` の
-`createPostHandler` は `post_api.ts` の `createPostHandler`）。
+APIごとにファイルを分けています。例: 投稿の作成処理は `src/post_api.ts` の
+`createPostHandler` です。他言語の配布実装を参照する場合は[削除前の履歴](../../docs/node-only-webapp.md)を使ってください。
 
 ## 起動
 
@@ -29,7 +29,7 @@ npm run check   # 型を検査する（tsc）
 
 ## 環境変数
 
-`webapp/go` と同じ `ISUREAL_REGION`、`ISUREAL_DB_HOST`、`ISUREAL_DB_PORT`、`ISUREAL_DB_USER`、
+`ISUREAL_REGION`、`ISUREAL_DB_HOST`、`ISUREAL_DB_PORT`、`ISUREAL_DB_USER`、
 `ISUREAL_DB_PASSWORD`、`ISUREAL_DB_NAME`、`ISUREAL_LOG_LEVEL` を読みます。加えて次の値を変えられます。
 
 | 変数 | 既定値 | 内容 |

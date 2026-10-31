@@ -109,7 +109,7 @@ export type ViewerContext = {
   blocked: Set<string>;
 };
 
-export async function loadViewerContext(db: Queryer, viewerID: string, authenticatedUser?: User): Promise<ViewerContext | undefined> {
+export async function loadViewerContext(db: Queryer, viewerID: string, authenticatedUser?: User, options: { requirePostedToday?: boolean } = {}): Promise<ViewerContext | undefined> {
   const user = authenticatedUser?.id === viewerID ? authenticatedUser : await getUser(db, viewerID);
   if (!user) {
     return undefined;
@@ -129,6 +129,10 @@ export async function loadViewerContext(db: Queryer, viewerID: string, authentic
     viewer.user.region,
   ));
   viewer.hasPostedToday = posted.exists;
+  // フィードは本人の投稿を含まないため、未投稿なら関係情報も不要。
+  if (options.requirePostedToday && !viewer.hasPostedToday) {
+    return undefined;
+  }
   viewer.blocked = await getBlockedUserIDs(db, viewer.user.id);
   const friends = await getFriendIDs(db, viewer.user.id);
   if (friends.length === 0) {

@@ -44,7 +44,7 @@ export function getFeedHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(400, "invalid_pagination");
     }
     const session = getSession(c)!;
-    const viewer = await loadViewerContext(h.db, session.userID, session.user);
+    const viewer = await loadViewerContext(h.db, session.userID, session.user, { requirePostedToday: true });
     if (!viewer) {
       const response: GetFeedResponse = { items: [], hasMore: false };
       return jsonResponse(c, 200, response);
