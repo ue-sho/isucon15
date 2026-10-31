@@ -1,3 +1,5 @@
+> 最終構成は4本です。#15226の再評価で重複したposts_active_author_window_idxを撤去しました。[再評価記録](pprotein-index-review.md)を参照してください。以下の5本適用記録は撤去前の履歴です。
+
 # 認証・投稿検索の追加索引
 
 関連: [Issue #18](https://github.com/ue-sho/isucon15/issues/18)。
@@ -127,7 +129,7 @@ up.sqlを実行し、両候補が実計画で選ばれること、前後の結�
 追加前後の計画原本: `/tmp/isu15-index-audit2-before.json` / `/tmp/isu15-index-audit2-after.json`。
 合成データのテストではsession0.978→0.011ms、投稿画像0.099→0.014ms、件数0.048→0.021ms、followers1.012→0.125msだったが、単発かつ分布が本番と異なるので採用効果の証明にはしない。
 
-## 現在の反映状態
+## 5本追加直後の反映状態
 
 計5本は本番DBに反映済み。通常のデプロイ・サービス再起動は不要で、索引作成後は既存SQLの再計画で利用される。
 デプロイやresetは追加索引を削除しない。001-schema.sqlには新規DB用の定義を置き、適用/撤去SQLには既存DB用の手順を残す。
