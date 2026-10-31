@@ -88,6 +88,13 @@ def remote_deploy(config, host):
             if enabled(service):
                 config.sudo('systemctl', 'restart', service)
         if host == config.require('PPROTEIN_HOST') and enabled('pprotein.service'):
+            # Type=simpleのrestart完了時点ではHTTP待受がまだ始まっていない場合がある。
+            # 設定POSTは再送せず、読み取りAPIの起動待ちだけを上限付きで再試行する。
+            step = 'pprotein-health'
+            config.run(['curl', '-fsS', '--connect-timeout', '1', '--max-time', '2',
+                        '--retry', '10', '--retry-delay', '1', '--retry-max-time', '15',
+                        '--retry-connrefused', '-o', '/dev/null',
+                        'http://127.0.0.1:9000/api/group/targets'], capture=True)
             step = 'pprotein-config'
             for name, endpoint in [('alp', 'httplog'), ('slp', 'slowlog')]:
                 path = config.tools / 'pprotein' / (name + '.yml')
