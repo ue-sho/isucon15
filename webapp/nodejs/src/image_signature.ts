@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createHmac } from "node:crypto";
+import { createHash, hash } from "node:crypto";
 import { unix } from "./time.ts";
 import type { User } from "./user.ts";
 
@@ -70,10 +70,7 @@ export function imageSignature(key: Buffer, imageID: string, exp: number | strin
     }
   }
 
-  let value = Buffer.from(`${expText}:${imageID}`);
-  for (let i = 0; i < imageSignatureIterations; i++) {
-    value = createHmac("sha256", key).update(value).digest();
-  }
+  const value = repeatedHmacSha256(key, Buffer.from(`${expText}:${imageID}`));
   if (cacheKey !== undefined) {
     // Immutable storage also isolates the cache from mutations through a
     // returned Buffer's backing ArrayBuffer (including pooled allocations).
@@ -87,6 +84,27 @@ export function imageSignature(key: Buffer, imageID: string, exp: number | strin
     }
     signatureCache.set(cacheKey, { signature, expiresAt: now + signatureCacheLifetimeMs, bytes });
     signatureCacheBytes += bytes;
+  }
+  return value;
+}
+
+// HMAC-SHA256 = SHA256(opad || SHA256(ipad || message)). The key pads are
+// identical in all 1000 iterations. Keep them in request-local buffers and use
+// the one-shot hash API to avoid creating 1000 streaming HMAC objects.
+function repeatedHmacSha256(key: Buffer, message: Buffer): Buffer {
+  if (key.length > 64) key = createHash("sha256").update(key).digest();
+  const inner = Buffer.alloc(96, 0x36);
+  const outer = Buffer.alloc(96, 0x5c);
+  for (let i = 0; i < key.length; i++) {
+    inner[i] ^= key[i];
+    outer[i] ^= key[i];
+  }
+  hash("sha256", Buffer.concat([inner.subarray(0, 64), message]), "buffer").copy(outer, 64);
+  let value = hash("sha256", outer, "buffer");
+  for (let i = 1; i < imageSignatureIterations; i++) {
+    value.copy(inner, 64);
+    hash("sha256", inner, "buffer").copy(outer, 64);
+    value = hash("sha256", outer, "buffer");
   }
   return value;
 }

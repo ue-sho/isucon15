@@ -114,17 +114,17 @@ test("friends feed: PostgreSQLで変更前のJSON・権限・ページングと�
     assert.equal(rows.length, 51);
     rows[50] = new Proxy({}, { get() { throw new Error("51件目の変換は禁止"); } });
     const db = { select: async () => rows } as unknown as Queryer;
-    const hmac = crypto.createHmac;
+    const hash = crypto.hash;
     let calls = 0;
     t.mock.method(Date, "now", () => stamp.epochMilliseconds + 48 * 60 * 60 * 1000);
-    crypto.createHmac = (...args: Parameters<typeof crypto.createHmac>) => { calls++; return hmac(...args); };
+    crypto.hash = ((...args: Parameters<typeof crypto.hash>) => { calls += 0.5; return hash(...args); }) as typeof crypto.hash;
     syncBuiltinESMExports();
     try {
       const result = await getFriendsFeed(db, "viewer", null, "");
       assert.equal(result.items.length, 50);
       assert.equal(result.hasMore, true);
       assert.equal(calls, 50 * 2 * 1000);
-    } finally { crypto.createHmac = hmac; syncBuiltinESMExports(); }
+    } finally { crypto.hash = hash; syncBuiltinESMExports(); }
   });
   for (const path of ["/feeds/unknown", "/feeds/friends?beforeId=x", "/feeds/friends?beforePostedAt=2026-10-31T00:00:00Z", "/feeds/friends?beforePostedAt=invalid&beforeId=x", "/feeds/friends?beforeScore=invalid", "/feeds/friends-of-friends?beforeScore=3"]) {
     await t.test(`入力エラーをDB呼出し前に維持: ${path}`, async () => {

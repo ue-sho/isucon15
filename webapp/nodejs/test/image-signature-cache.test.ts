@@ -14,7 +14,7 @@ const wallStart = 1800000000000;
 const exp = wallStart / 1000 + 86400;
 const key = Buffer.alloc(32, 19);
 let moduleID = 0;
-const realCreateHmac = crypto.createHmac;
+const realHash = crypto.hash;
 
 async function freshSignature() {
   const module: typeof import("../src/image_signature.ts") =
@@ -33,13 +33,14 @@ function clock(t: TestContext) {
 
 function countHmac(t: TestContext, cheap = false) {
   let calls = 0;
-  const fakeHmac = { update() { return fakeHmac; }, digest() { return Buffer.alloc(32); } };
-  t.mock.method(crypto, "createHmac", (...args: Parameters<typeof crypto.createHmac>) => {
-    calls++;
-    return cheap ? fakeHmac as unknown as crypto.Hmac : realCreateHmac(...args);
-  });
+  // Avoid retaining millions of mock call records during cache eviction tests.
+  crypto.hash = ((...args: Parameters<typeof crypto.hash>) => {
+    calls += 0.5; // Two SHA256 operations per HMAC iteration.
+    return cheap ? Buffer.alloc(32) : realHash(...args);
+  }) as typeof crypto.hash;
   syncBuiltinESMExports();
   t.after(() => {
+    crypto.hash = realHash;
     t.mock.restoreAll();
     syncBuiltinESMExports();
   });
@@ -54,6 +55,7 @@ test("fixed and 128 deterministic generated inputs match the original bytes on m
     [Buffer.alloc(0), "", exp],
     [Buffer.from([0, 255, 128]), "画像:/?:\u0000😀", exp],
     [Buffer.alloc(128, 255), "\ud800", exp],
+    ...[63, 64, 65].map((size): [Buffer, string, number] => [Buffer.alloc(size, 0xa5), "pad-boundary", exp]),
     [key, "id", 0], [key, "id", -0], [key, "id", NaN], [key, "id", Infinity],
     [key, "id", "NaN"], [key, "id", ""], [key, "id", "not:an:expiry"],
   ];
