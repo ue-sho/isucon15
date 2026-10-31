@@ -116,6 +116,8 @@ class RenderTests(unittest.TestCase):
         render_all(self.config)
         service = 'etc/systemd/system/pprotein.service'
         self.assertTrue((self.root / 's3' / service).exists())
+        self.assertIn('Environment=PATH=/home/isucon/isutools/pprotein/bin:',
+                      self.text('s3/' + service))
         self.assertFalse((self.root / 's1' / service).exists())
         self.config.values['PPROTEIN_HOST'] = 's2'
         render_all(self.config)

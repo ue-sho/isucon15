@@ -81,3 +81,54 @@ PostgreSQLのSQL計測は別途対応が必要。登録済みslowlogはMySQL向�
 今回の失敗位置はサービス再起動より後なので、デプロイ失敗でも設定配置・サービス再起動が既に実行されている点に注意。修正後の実環境でのtruncate・再デプロイは未実行。
 
 検証：`python3 -m unittest discover -s isutools/tests -p 'test_remote_bootstrap.py'`の44件成功。ファイル作成を要求するtruncateを拒否する回帰テストを追加した。
+
+## slowlog保存データの実確認
+
+2026-10-31、asia2の`/var/lib/pprotein/data/`と`GET /api/slowlog`を読み取り確認した。
+
+- グループID：`2026-10-31_01-53-00.280779`（UTC、JST 10:53開始）
+- 対象コミット：`7c662a83043d9ebae928ca06582d071201ca0c55`
+- asia2：`dminci5tvmvs-slowlog.log`、327,014,433バイト、`Status=ok`、`Message=Ready`、収集120秒。
+- asia1 / europe1 / america1：`Status=fail`、`Message=received empty content`。対象IDはそれぞれ`dminci5tqxky-slowlog.log` / `dminci5u3g61-slowlog.log` / `dminci5tgnqz-slowlog.log`。共有DBがasia2である構成と整合するが、今回その3台のDBへのSQL流入自体は調査していない。
+
+asia2のSQLログ収集・保存は成功している。pprotein UIのSQL解析成功はこの確認に含まない。ログ本文の持ち出し・全件解析・収集の再実行・ターゲット変更は行っていない。上記収集に対応するベンチID・スコアは未照合。
+
+## PostgreSQLの解析モード対応
+
+保存済みログの先頭64KBで比較したところ、`slp my`では結果0行、`slp pg --log-line-prefix='%m [%p] '`では37行を取得した。pprotein 1.2.4の`internal/extproc/slp/processor.go`は`slp my --output standard --format tsv`を固定で実行するため、PostgreSQLのログは収集できても表示が空になる。
+
+`isutools/pprotein/bin/slp`を追加し、pproteinサービスだけPATHの先頭にそのディレクトリを設定する。MySQL用の呼び出しをPostgreSQL用へ変換し、出力項目を回数・SQL・最小/最大/合計/平均時間に限定する。元の`/usr/local/bin/slp`は置き換えない。pproteinの表はTSVヘッダーから列を生成するため、存在しないMySQL固有のロック時間・走査行数を補う必要はない。既存slp.ymlのフィルターも引き続き適用する。実環境で同フィルターを使った64KBの試験ではヘッダー込み6行を取得した。
+
+修正はPR #21へ追加。実環境へのデプロイ・再起動は未実行。適用後に収集するログはPostgreSQLで解析される。既存IDの空の解析結果はpprotein.dbのcacheバケットに保存されており、再起動だけでは再解析されない。
+
+既存のグループを表示したい場合は、修正のデプロイ後、asia2で次を実行して保存済みログから新しい解析エントリを作成する。元のログとメタデータを残し、元のグループに`asia2-pg`を追加する。DB初期化や新たなSQL負荷収集は行わないが、約327MBの既存ログをコピー・解析するため、ベンチと重ならないタイミングで行う。再登録側のRepository情報は元のメタデータを継承しないため、対象SHAは元エントリ`7c662a8`を参照する。以下は未実行。
+
+```sh
+curl -fsS -X POST -H 'Content-Type: application/json' \
+  --data '{"GroupId":"2026-10-31_01-53-00.280779","Label":"asia2-pg","URL":"http://127.0.0.1:9000/api/slowlog/data/dminci5tvmvs-slowlog.log","Duration":120}' \
+  http://127.0.0.1:9000/api/slowlog
+```
+
+切り戻しはpproteinサービスのPATH追加を除去してデプロイする。保存済み原本は変更しない。
+
+検証：呼び出し・出力列の変換、他のslpサブコマンドの維持、サービス設定生成を含むPython unittest 118件成功。実稼働slpで保存ログの先頭64KBをPostgreSQLモード・現在のslp.yml・UI向けの6列指定で解析し、ヘッダーとデータを取得できることを確認した。実環境のpprotein UIでの表示はデプロイ後に確認が必要。
+
+## 確認できたアプリケーション・計測構成
+
+```mermaid
+flowchart LR
+  C[クライアント] --> R[運営ルーター]
+  R --> A[asia1: nginx → Node.js:8080]
+  R --> E[europe1: nginx → Node.js:8080]
+  R --> U[america1: nginx → Node.js:8080]
+  A --> DB[asia2: 共有 PostgreSQL 16]
+  E --> DB
+  U --> DB
+  P[asia2: pprotein:9000] --> AG[各ホスト: pprotein-agent:19000]
+  P --> NP[アプリ3台: Node profiler:6060]
+  AG --> L[nginxアクセスログ / PostgreSQLログ]
+```
+
+アプリのコードはNode.js・HonoでHTTPを処理し、pgの接続プールでPostgreSQLへ接続する。nginxは127.0.0.1:8080へプロキシする。リージョンとDB接続先は環境変数で指定する。実際のDB接続環境変数の値は今回表示・調査していない。4台ともローカルPostgreSQLクラスタはactiveだが、保存データの観測ではasia2だけにSQLログがあり、他3台は収集期間中空だった。
+
+pprotein本体の作業ディレクトリは`/var/lib/pprotein`、保存先は`/var/lib/pprotein/data/`。agentがログを返し、Node profilerはCPUプロファイルを返す。initializeハンドラからpproteinへgroup収集を要求する。asia2にはNodeアプリが動いておらず、6060番は接続拒否を確認済み。現在のgroup設定にはまだasia2のpprofが含まれ、その対象は成功しない。

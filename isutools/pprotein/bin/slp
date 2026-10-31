@@ -1,0 +1,25 @@
+#!/usr/bin/python3
+"""Adapt pprotein 1.2.4's fixed `slp my` invocation to PostgreSQL."""
+import os
+import sys
+
+PG_COLUMNS = 'count,query,min-query-time,max-query-time,sum-query-time,avg-query-time'
+
+
+def postgres_args(args):
+    args = list(args)
+    if not args or args[0] != 'my':
+        return args
+    args[0] = 'pg'
+    for index, arg in enumerate(args):
+        if arg in ('--output', '-o') and index + 1 < len(args):
+            if args[index + 1] in ('standard', 'all'):
+                args[index + 1] = PG_COLUMNS
+        elif arg in ('--output=standard', '--output=all'):
+            args[index] = '--output=' + PG_COLUMNS
+    args.extend(['--log-line-prefix', '%m [%p] '])
+    return args
+
+
+if __name__ == '__main__':
+    os.execv('/usr/local/bin/slp', ['slp', *postgres_args(sys.argv[1:])])
