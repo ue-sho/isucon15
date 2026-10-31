@@ -12,7 +12,7 @@ export type RealMoji = {
   deletedAt: Temporal.Instant | null;
 };
 
-function realMojiFromRow(row: Row): RealMoji {
+export function realMojiFromRow(row: Row): RealMoji {
   return {
     id: row.id,
     postID: row.post_id,

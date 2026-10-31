@@ -14,8 +14,9 @@ type ExportPostResponse = PostResponse & {
 
 export function exportPostsHandler(h: HandlerContext): Handler<Env> {
   return async (c) => {
-    const userID = getSession(c)!.userID;
-    const author = must(await getUser(h.db, userID));
+    const session = getSession(c)!;
+    const userID = session.userID;
+    const author = session.user ?? must(await getUser(h.db, userID));
     const posts = await h.db.select(
       `
    SELECT ${postColumns}, i.data AS image_data

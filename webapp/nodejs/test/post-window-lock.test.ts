@@ -22,7 +22,7 @@ const enabled = process.env.POST_WINDOW_LOCK_TEST === "1";
 const docker = promisify(execFile);
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const isWindowSelect = (sql: string) => sql.startsWith("SELECT id, local_date, starts_at FROM posting_windows");
-const isUserLock = (sql: string) => sql.startsWith("SELECT id FROM users");
+const isUserLock = (sql: string) => sql.startsWith("SELECT id") && sql.includes("FROM users") && sql.includes("FOR NO KEY UPDATE");
 const isWindowEnd = (sql: string) => sql.startsWith("UPDATE posting_windows SET ended_at");
 
 async function within<T>(promise: PromiseLike<T>, message = "operation timed out"): Promise<T> {
@@ -335,7 +335,7 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     const moving = Promise.withResolvers<QueryEvent>();
     f.db.hook = (e) => {
       if (e.phase === "after" && isWindowSelect(e.sql)) return gate.hold(e);
-      if (e.phase === "before" && e.sql.startsWith("UPDATE users SET region")) moving.resolve(e);
+      if (e.phase === "before" && e.sql.startsWith("UPDATE users SET")) moving.resolve(e);
     };
     const posting = f.post();
     const holder = await within(gate.reached);
@@ -353,7 +353,7 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     const gate = f.gate();
     const posting = Promise.withResolvers<QueryEvent>();
     f.db.hook = (e) => {
-      if (e.phase === "after" && e.sql.startsWith("UPDATE users SET region")) return gate.hold(e);
+      if (e.phase === "after" && e.sql.startsWith("UPDATE users SET")) return gate.hold(e);
       if (e.phase === "before" && isUserLock(e.sql)) posting.resolve(e);
     };
     const moving = f.move();

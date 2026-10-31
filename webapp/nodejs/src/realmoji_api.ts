@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
-import { must } from "./db.ts";
+import { must, type Row } from "./db.ts";
 import { signedImageURL } from "./image_signature.ts";
 import { decodeJPEG } from "./jpeg.ts";
 import { canViewPost, getPost } from "./post.ts";
-import { getRealMoji, selectCurrentRealMojis, type RealMoji } from "./realmoji.ts";
+import { realMojiFromRow, selectCurrentRealMojis, type RealMoji } from "./realmoji.ts";
 import { beginRelationshipTx } from "./relationship.ts";
 import type { RelationshipUserResponse } from "./relationship_list_api.ts";
 import { jsonResponse, noContent } from "./response.ts";
@@ -86,15 +86,15 @@ export function replaceRealMojiHandler(h: HandlerContext): Handler<Env> {
     const imageID = randomUUID();
     await tx.exec(`INSERT INTO image_objects(id,owner_user_id,data,media_type) VALUES($1,$2,$3,'image/jpeg')`, imageID, actor, data);
     const id = randomUUID();
-    await tx.exec(
-      `INSERT INTO realmojis(id,post_id,reactor_id,image_id,reaction_type,created_at) VALUES($1,$2,$3,$4,$5,clock_timestamp())`,
+    const row = must(await tx.get<Row>(
+      `INSERT INTO realmojis(id,post_id,reactor_id,image_id,reaction_type,created_at) VALUES($1,$2,$3,$4,$5,clock_timestamp()) RETURNING id,post_id,reactor_id,image_id,reaction_type,created_at,replaced_at,deleted_at`,
       id,
       post.id,
       actor,
       imageID,
       input.reactionType,
-    );
-    const reaction = must(await getRealMoji(tx, id));
+    ));
+    const reaction = realMojiFromRow(row);
     const user = must(await getUser(tx, actor));
     await tx.commit();
     return jsonResponse(c, 201, newRealMojiResponse(reaction, user));
