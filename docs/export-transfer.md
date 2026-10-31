@@ -59,6 +59,19 @@ PRはmain基準のexport差分のみ。調査中の本番は #40 `perf/nginx-ima
 
 このためベンチ用に別の `bench/export-archive` ブランチへ現在の #40版と本変更を統合する。実装PRのheadとベンチ用headは別で、両方を記録する。#39の認証再利用とはexport冒頭で同時編集になり得るが、本変更はprojection/復元部分だけなので両方維持できる。
 
+統合した製品コード `10a6b08`（#40 `7331c86` + export変更）で、型検査とexport実PG・署名・page-responseの計53件が成功、失敗0・skip0。main基準で失敗するpage-response 21件は、#40に含まれる既存修正で通過した。本番の全4台が `7331c86`、app3台・DBがactiveであることも読み取りで確認した。統合後に製品コードの追加変更はない。
+
+ユーザー向け実行手順（本番に別変更が入っていないことと、他のベンチ/書き出し完了を確認した上で）:
+
+```sh
+cd /Users/yk/Documents/private/isu-con/isucon15-export-bench
+DISCORD_WEBHOOK_URL= task deploy BRANCH=bench/export-archive &&
+DISCORD_WEBHOOK_URL= task status
+ssh asia1 'systemctl is-active isureal-nodejs.service isureal-nodejs-europe.service isureal-nodejs-america.service'
+```
+
+全4台がベンチ用headと一致し、app3台とasia1の補助サービスがactiveなら、[ポータル](https://portal.isucon.net/contestant/benchmark_jobs)でEnqueue。追加migration不要。CLIのポータル認証を確認していないため `task bench` を無条件には案内しない。#40の比較ベンチが未実施なら、この変更の反映前に同版で基準を取る。
+
 ベンチはユーザーが実行する。#40単体の同構成結果を基準とし、今回のexport版との地域別export件数・成功・avg/p95・全体スコア・他APIを比較する。#15863との差をexportだけの効果とは扱わない。計測前後に別のデプロイ・画像書き出し・DDLを重ねない。
 
 追加migrationは不要。切り戻しはベンチ用ブランチのexport変更だけをrevertするか、固定した元の #40版へ戻す。DBの保存形式や既存画像ファイルは今回変更しない。共有環境のデプロイ・再起動・initialize・競技ベンチ・マージは実施していない。
