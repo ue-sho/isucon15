@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import jpeg from 'jpeg-js';
 import { application, database, headers, nginx, response } from './harness.ts';
 
-const base = process.env.ASIA_NGINX_BASE ?? '993e1b0dd58d68d7b63e77bff26d046d2a0173b3';
+const base = process.env.ASIA_NGINX_BASE ?? '053af6eca4400864c62269ca6188d6701dd8a7a3';
 const path = '/api/posting-window/current';
 test('Asia current posting window: real nginx + current Hono + isolated PG16', { skip: process.env.ASIA_WINDOW_TEST !== '1', timeout: 180_000 }, async t => {
   const pg = await database(); t.after(pg.close);

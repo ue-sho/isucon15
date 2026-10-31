@@ -1,10 +1,10 @@
 # Asiaの投稿期間GETを既存asia2アプリへ分離
 
-Asiaの完全一致 `GET /api/posting-window/current` だけを、既存Memories upstream（192.168.4.10:8080、region=asia）へ渡す。実nginxと現行Honoで基準との応答一致を確認したが、本番ベンチは未実施で、採用判断は保留する。
+Asiaの完全一致 `GET /api/posting-window/current` だけを、既存Memories upstream（192.168.4.10:8080、region=asia）へ渡す。実nginxと現行Honoで基準との応答一致を確認したが、本番ベンチは未実施で、採用非推奨のDraftとして保留する。最新mainでの局所比較にも遅延悪化があり、改善を確認できていない。
 
 ## 基準・変更理由
 
-基準mainは `993e1b0dd58d68d7b63e77bff26d046d2a0173b3`、独立ブランチは `perf/asia-window-routing`。画像アップロードの変更は含まない。
+基準mainは `053af6eca4400864c62269ca6188d6701dd8a7a3`、独立ブランチは `perf/asia-window-routing`。画像アップロードの変更は含まない。
 
 [調査記録](https://github.com/ue-sho/isucon15/issues/11#issuecomment-6540905647) のベンチ27678（計測版589f52d）では当該GETはAsia96件・平均743ms・p95 3124ms、Europe平均124ms、America平均135ms。対応SQLの全地域平均は0.198msだった。HTTP時間からNode実行待ち・pool待ちの内訳は特定できない。重い処理と実行場所を分ける仮説であり、SQLが短いことだけでは効果を保証しない。
 
@@ -31,12 +31,12 @@ npm run check
 
 | 順序 | GET平均 / p95 ms | Memories平均 / p95 ms | local / asia2 Node CPU ms | local / asia2 最大RSS MiB |
 |---|---:|---:|---:|---:|
-| baseline | 2.31 / 3.84 | 3.96 / 5.58 | 12.00 / 31.63 | 118.6 / 136.7 |
-| routing | 2.48 / 3.90 | 3.92 / 5.33 | 0.28 / 28.25 | 118.6 / 137.0 |
-| routing | 2.05 / 2.78 | 3.72 / 5.00 | 0.26 / 25.08 | 118.6 / 137.1 |
-| baseline | 2.49 / 5.05 | 3.90 / 7.48 | 10.02 / 20.47 | 109.9 / 137.2 |
+| baseline | 2.45 / 4.05 | 4.30 / 6.88 | 8.19 / 28.28 | 126.3 / 141.0 |
+| routing | 3.99 / 4.04 | 6.95 / 33.79 | 0.33 / 61.32 | 126.3 / 141.4 |
+| routing | 2.74 / 4.81 | 4.07 / 6.09 | 0.22 / 25.55 | 126.3 / 141.6 |
+| baseline | 1.85 / 2.41 | 3.31 / 4.23 | 9.82 / 17.76 | 127.7 / 141.7 |
 
-当該GET平均は基準2.31–2.49ms、転送2.05–2.48msで差は小さい。Memoriesも基準3.90–3.96ms、転送3.72–3.92ms。安定した性能向上を示す結果ではなく、本番の待機隔離効果・MemoriesやDBへの悪影響は未確認。
+当該GET平均は基準1.85–2.45ms、転送2.74–3.99ms。Memories平均は基準3.31–4.30ms、転送4.07–6.95ms、p95最大6.88→33.79msへ悪化した試行がある。少数・短時間試験なので因果や安定した悪化率は断定しないが、改善は確認できず採用を勧めない。本番の待機隔離効果・MemoriesやDBへの悪影響も未確認。
 
 専用試験7件成功・skipなし、型チェック成功。検証内容:
 
@@ -60,8 +60,10 @@ ssh asia1 'sudo nginx -t && systemctl is-active nginx isureal-nodejs.service'
 ssh asia2 'systemctl is-active isureal-nodejs.service'
 ```
 
-`task deploy` は指定ブランチを全4台へ反映し、enabledサービス再起動・DB再起動・ログ切詰めも行うため、計測保全と反映順を調整する。statusの4台のSHAがPR headに一致し、asia2のappもactiveであることを確認する。PR本文のhash照合と401疎通確認後、[ポータル](https://portal.isucon.net/contestant/benchmark_jobs) でEnqueueを1回実行。API実動作は未確認なので `task bench` は案内しない（同コマンドにもデプロイがある）。
+`task deploy` は指定ブランチを全4台へ反映し、enabledサービス再起動・DB再起動も行うため、計測保全と反映順を調整する。statusの4台のSHAがPR headに一致し、asia2のappもactiveであることを確認する。PR本文のhash照合と401疎通確認後、[ポータル](https://portal.isucon.net/contestant/benchmark_jobs) でEnqueueを1回実行。API実動作は未確認なので `task bench` は案内しない（同コマンドにもデプロイがある）。
 
 公式比較では当該GETとMemories双方の件数・p95・エラー、asia1/asia2の実worker CPU/RSS、DB負荷、投稿/通知の退行と総点を確認する。単独のSQL時間や軽負荷の応答短縮だけで採用しない。
 
-切戻しはPR headから別のrollbackブランチを作り、本PR実装コミットだけをrevert・pushしてdeployする。SHAと具体的コマンドはPR本文に掲載。DB操作やasia2停止は不要。unused snippetが実機に残っても参照されない。他方がmainへ入ったら最新mainを本ブランチへ取り込み実試験を再実行する。本PRもmainへ入った後の切戻しは最新mainから本PRだけをrevertし、既存Memories・画像・他変更を維持する。
+単独試験の切戻しは確認済み基準mainから別のrollbackブランチを作り、pushしてdeployする。固定SHAとコマンドはPR本文に掲載。DB操作やasia2停止は不要。unused snippetが実機に残っても参照されない。他方がmainへ入ったら最新mainを本ブランチへ取り込み実試験を再実行する。本PRもmainへ入った後の切戻しは最新mainから本PRだけをrevertし、既存Memories・画像・他変更を維持する。
+
+提出中に更新されたmainの計測停止（#72）を両候補へ取り込み、再検証した。業務処理と比較対象のlocationは同じで、試験用計測だけをfixture内で有効にしている。本番の計測停止設定は維持する。最新のdeployは計測停止modeではpproteinを停止し、既存ログの切詰めを省く。
