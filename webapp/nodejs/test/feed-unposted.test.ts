@@ -155,6 +155,62 @@ test("unposted feeds with PostgreSQL", { skip: !port }, async (t) => {
     assert.equal(result.status, 200);
     assert.equal(result.body.id, "own-past");
   });
+  await t.test("public feed filters before limiting and pages without relationship loading", async () => {
+    try {
+      await createViewerPost();
+      await admin.query(`
+        INSERT INTO users(id,username,secret_key_hash,display_name,region)
+        SELECT 'page-user-'||n,'page-user-'||n,repeat('ab',32),'page','asia' FROM generate_series(1,120) n;
+        INSERT INTO posts(id,author_id,posting_window_id,image_id,visibility,location_kind,posted_at)
+        SELECT 'page-post-'||lpad(n::text,3,'0'),'page-user-'||n,'current','page-image-'||n,
+          CASE WHEN n>110 THEN 'friends' ELSE 'public' END,'none','2026-10-31'
+        FROM generate_series(1,120) n;
+        INSERT INTO block_relations(id,blocker_id,blocked_id) VALUES
+          ('page-out','viewer','page-user-110'),('page-in','page-user-109','viewer');
+        UPDATE users SET status='deleted' WHERE id='page-user-108';
+        UPDATE posts SET deleted_at=now() WHERE id='page-post-107';
+      `);
+      const reference = await admin.query(`SELECT p.id FROM posts p
+        JOIN users u ON u.id=p.author_id AND u.status='active'
+        JOIN posting_windows w ON w.id=p.posting_window_id AND w.ended_at IS NULL
+        WHERE p.author_id<>'viewer' AND p.deleted_at IS NULL AND p.visibility='public'
+        AND NOT EXISTS(SELECT 1 FROM block_relations b
+          WHERE (b.blocker_id='viewer' AND b.blocked_id=p.author_id)
+             OR (b.blocked_id='viewer' AND b.blocker_id=p.author_id))
+        ORDER BY p.posted_at DESC,p.id DESC`);
+      const collected: string[] = [];
+      let path = '/feeds/public';
+      for (;;) {
+        const result = await request(path);
+        assert.equal(result.status, 200);
+        assert.equal(result.queries.length, 3, 'user, posting check, bounded candidates only');
+        assert.ok(result.queries[2].includes('LIMIT 51'));
+        assert.ok(result.body.items.length <= 50);
+        collected.push(...result.body.items.map((item: { id: string }) => item.id));
+        if (!result.body.hasMore) break;
+        const last = result.body.items.at(-1);
+        path = `/feeds/public?beforeId=${last.id}&beforePostedAt=${encodeURIComponent(last.postedAt)}`;
+      }
+      assert.deepEqual(collected, reference.rows.map(row => row.id));
+      // 関係の変更は次の要求へ即時反映する。
+      await admin.query("INSERT INTO block_relations(id,blocker_id,blocked_id) VALUES('page-new','page-user-106','viewer')");
+      const after = await request('/feeds/public');
+      assert.ok(!after.body.items.some((item: { id: string }) => item.id === 'page-post-106'));
+      for (const count of [0, 48, 49]) {
+        await admin.query(`UPDATE posts SET deleted_at=CASE
+          WHEN substring(author_id from 11)::int <= $1 THEN NULL ELSE now() END
+          WHERE id LIKE 'page-post-%'`, [count]);
+        const boundary = await request('/feeds/public');
+        assert.equal(boundary.body.items.length, Math.min(count + 2, 50));
+        assert.equal(boundary.body.hasMore, count + 2 > 50);
+      }
+    } finally {
+      await admin.query("DELETE FROM block_relations WHERE id LIKE 'page-%'");
+      await admin.query("DELETE FROM posts WHERE id LIKE 'page-%'");
+      await admin.query("DELETE FROM users WHERE id LIKE 'page-%'");
+      await restore();
+    }
+  });
   for (const path of ["/feeds/unknown", "/feeds/friends?beforeId=x", "/feeds/friends-of-friends?beforeScore=3", "/feeds/public?beforePostedAt=invalid&beforeId=x"]) {
     await t.test(`invalid request still fails before querying: ${path}`, async () => {
       const result = await request(path);

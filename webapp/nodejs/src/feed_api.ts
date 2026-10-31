@@ -48,7 +48,8 @@ export function getFeedHandler(h: HandlerContext): Handler<Env> {
     if (input.feed === "friends") {
       return jsonResponse(c, 200, await getFriendsFeed(h.db, session.userID, input.beforePostedAt, input.beforeId));
     }
-    const viewer = await loadViewerContext(h.db, session.userID, session.user, { requirePostedToday: true });
+    const publicFeed = input.feed === "public";
+    const viewer = await loadViewerContext(h.db, session.userID, session.user, { requirePostedToday: true, publicFeed });
     if (!viewer) {
       const response: GetFeedResponse = { items: [], hasMore: false };
       return jsonResponse(c, 200, response);
@@ -65,7 +66,14 @@ export function getFeedHandler(h: HandlerContext): Handler<Env> {
       `
    AND p.author_id <> $1 AND w.ended_at IS NULL
    AND ($2::timestamptz IS NULL OR (p.posted_at, p.id) < ($2, $3))
+   ${publicFeed ? `AND p.visibility = 'public'
+   AND NOT EXISTS (
+     SELECT 1 FROM block_relations b
+     WHERE (b.blocker_id = $1 AND b.blocked_id = p.author_id)
+        OR (b.blocked_id = $1 AND b.blocker_id = p.author_id)
+   )` : ""}
    ORDER BY p.posted_at DESC, p.id DESC
+   ${publicFeed ? "LIMIT 51" : ""}
   `,
       viewer.user.id,
       ranked ? null : input.beforePostedAt,

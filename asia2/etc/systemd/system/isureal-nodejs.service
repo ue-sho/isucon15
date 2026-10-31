@@ -1,14 +1,15 @@
 [Unit]
-Description=isureal-nodejs
-After=network-online.target
-Wants=network-online.target
+Description=ISUReal Asia Memories API near shared PostgreSQL
+After=network-online.target postgresql@16-main.service
+Wants=network-online.target postgresql@16-main.service
 
 [Service]
 User=isucon
 Group=isucon
 WorkingDirectory=/home/isucon/webapp/nodejs
 EnvironmentFile=/home/isucon/env.sh
-ExecStart=/home/isucon/local/node/bin/node src/main.ts
+# env.shの値より優先する。DBと同居するためworker数と接続数を制限する。
+ExecStart=/usr/bin/env ISUREAL_REGION=asia ISUREAL_PORT=8080 ISUREAL_WORKERS=1 ISUREAL_DB_POOL_SIZE=2 ISUREAL_DB_HOST=127.0.0.1 /home/isucon/local/node/bin/node src/main.ts
 Restart=on-failure
 RestartSec=5
 
