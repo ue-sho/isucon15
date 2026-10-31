@@ -41,6 +41,11 @@ function setup(kind: Kind, count: number, filtered = false) {
     },
     select: async (sql: string, ...args: unknown[]) => {
       queries.push({ sql, args });
+      if (kind === "ranked" && sql.includes("AS recommendation_score")) {
+        // 推薦の絞込み・順位・cursorはSQL側で適用済み。実SQLはPG比較試験で検証する。
+        return records.filter((row) => !args[3] || row.id < String(args[3]))
+          .slice(0, 51).map((row) => ({ ...row, recommendation_score: 3 }));
+      }
       // 投稿候補SQL内のNOT EXISTSもblock_relationsを参照する。
       // 関係だけを取得するSQLと区別し、投稿候補を空配列に置き換えない。
       if (sql.includes("FROM block_relations") && !sql.includes("FROM posts p")) return [];
