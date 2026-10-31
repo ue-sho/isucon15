@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
-import { must, type Row } from "./db.ts";
+import type { Row } from "./db.ts";
 import { signedImageURL } from "./image_signature.ts";
 import { jsonResponse, noContent } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
@@ -68,25 +68,20 @@ export function registerHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(400, "invalid_registration");
     }
     const secretKey = randomUUID();
-    await using tx = await h.db.begin();
-    // ユーザー名が一意である必要があります。
-    await tx.exec(`LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`);
-    const { exists } = must(await tx.get<{ exists: boolean }>(`SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)`, input.username));
-    if (exists) {
-      throw new APIError(409, "username_taken");
-    }
     const userID = randomUUID();
-    const row = must(await tx.get<Row>(
-      `INSERT INTO users (id, username, secret_key_hash, display_name, region) VALUES ($1, $2, $3, $4, $5) RETURNING ${userColumns.join(", ")}`,
+    const row = await h.db.get<Row>(
+      `INSERT INTO users (id, username, secret_key_hash, display_name, region) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (username) DO NOTHING RETURNING ${userColumns.join(", ")}`,
       userID,
       input.username,
       sha256Hex(secretKey),
       input.displayName,
       input.region,
-    ));
+    );
+    if (!row) {
+      throw new APIError(409, "username_taken");
+    }
     const user = userFromRow(row);
     setImageKey(user);
-    await tx.commit();
     return jsonResponse(c, 201, { secretKey, user: newSessionUserResponse(user) });
   };
 }

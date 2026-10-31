@@ -91,14 +91,22 @@ test("認証・権限・RETURNING / 新規ローカルPostgreSQL", { skip: !port
       sqls.length = 0;
       const response = await request("/register", "", "POST", { username: name, displayName: name, region: "asia" });
       assert.equal(response.status, 201, await response.clone().text());
-      assert.equal(sqls.length, 3);
+      assert.equal(sqls.length, 1);
       const body = await response.json();
       secrets.set(name, body.secretKey);
       sqls.length = 0;
       await login(name);
-      assert.equal(sqls.length, 3);
+      assert.equal(sqls.length, 2);
       assert.equal(sqls.filter((sql) => sql.includes("FOR NO KEY UPDATE")).length, 1);
     }
+    const registrations = await Promise.all(Array.from({ length: 8 }, () =>
+      request("/register", "", "POST", { username: "concurrent", displayName: "Concurrent", region: "asia" })));
+    assert.equal(registrations.filter((response) => response.status === 201).length, 1);
+    assert.equal(registrations.filter((response) => response.status === 409).length, 7);
+    for (const response of registrations.filter((response) => response.status === 409)) {
+      assert.equal((await response.json()).error, "username_taken");
+    }
+    assert.equal((await control.query("SELECT count(*)::int AS count FROM users WHERE username='concurrent'")).rows[0].count, 1);
     sqls.length = 0;
     assert.equal((await request("/me", tokens.get("viewer")!)).status, 200);
     assert.equal(sqls.length, 1);

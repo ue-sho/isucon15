@@ -100,19 +100,17 @@ export async function createLoginSessionTx(tx: Tx, userID: string): Promise<Sess
 export async function createLoginSessionForLockedUserTx(tx: Tx, userID: string): Promise<Session> {
   const randomToken = randomUUID();
   const tokenHash = sha256Hex(randomToken);
-  await tx.exec(
-    `
-  UPDATE login_sessions
-  SET active = false, invalidated_at = clock_timestamp(), reason = 'replaced'
-  WHERE user_id = $1 AND active = true
- `,
-    userID,
-  );
   const sessionID = randomUUID();
   const row = must(await tx.get<{ user_id: string; token_hash: string; created_at: Temporal.Instant }>(
     `
+  WITH invalidated AS (
+    UPDATE login_sessions
+    SET active = false, invalidated_at = clock_timestamp(), reason = 'replaced'
+    WHERE user_id = $2 AND active = true
+    RETURNING id
+  )
   INSERT INTO login_sessions (id, user_id, token_hash)
-  VALUES ($1, $2, $3)
+  SELECT $1, $2, $3 FROM (SELECT count(*) FROM invalidated) AS completed
   RETURNING user_id, token_hash, created_at
  `,
     sessionID,
