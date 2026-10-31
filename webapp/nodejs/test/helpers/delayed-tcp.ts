@@ -5,6 +5,7 @@ export async function delayedTCP(targetPort: number, rttMs: number) {
   if (!Number.isFinite(rttMs) || rttMs < 0 || rttMs > 1000) throw new Error("invalid test RTT");
   const sockets = new Set<net.Socket>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
+  let uploaded = 0, downloaded = 0;
   const later = (callback: () => void) => {
     const timer = setTimeout(() => { timers.delete(timer); callback(); }, rttMs / 2);
     timers.add(timer);
@@ -18,8 +19,8 @@ export async function delayedTCP(targetPort: number, rttMs: number) {
     }
     downstream.on("error", () => upstream.destroy());
     upstream.on("error", () => downstream.destroy());
-    downstream.on("data", (chunk) => later(() => { if (!upstream.destroyed) upstream.write(chunk); }));
-    upstream.on("data", (chunk) => later(() => { if (!downstream.destroyed) downstream.write(chunk); }));
+    downstream.on("data", (chunk) => { uploaded += chunk.length; later(() => { if (!upstream.destroyed) upstream.write(chunk); }); });
+    upstream.on("data", (chunk) => { downloaded += chunk.length; later(() => { if (!downstream.destroyed) downstream.write(chunk); }); });
     downstream.on("end", () => later(() => upstream.end()));
     upstream.on("end", () => later(() => downstream.end()));
   });
@@ -28,7 +29,7 @@ export async function delayedTCP(targetPort: number, rttMs: number) {
     server.listen(0, "127.0.0.1", resolve);
   });
   const address = server.address() as net.AddressInfo;
-  return { port: address.port, async close() {
+  return { port: address.port, get uploadedBytes() { return uploaded; }, get downloadedBytes() { return downloaded; }, async close() {
     for (const timer of timers) clearTimeout(timer);
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
