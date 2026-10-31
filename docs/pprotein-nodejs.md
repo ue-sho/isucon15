@@ -71,3 +71,13 @@ PostgreSQLのSQL計測は別途対応が必要。登録済みslowlogはMySQL向�
 変更はPR #21に追加。実環境への配置・agent再起動は未実行なので、反映前は同じエラーが続く。PostgreSQLログの収集成功とpprotein UIでの解析成功は別であり、解析モードの対応は未完了。戻す場合はagentユニットとSLOW_LOGを以前の値へ戻してデプロイする。
 
 検証：Python unittest 114件成功。PostgreSQL向けagent生成と、デプロイ時にログの0640が維持されることを追加テストで確認した。
+
+### truncateのPermission denied対応
+
+同日、全4台のデプロイがtruncate段階で失敗したとの報告を受けた。asia2を読み取り確認し、ログディレクトリがroot:postgres・1775、ログがpostgres:postgres・0640、`fs.protected_regular=2`であることを確認した。agentにはPostgreSQLのログパスとpostgresグループが反映済みだった。
+
+通常のtruncateがO_CREATを指定することで、group writableかつstickyなディレクトリ内の他ユーザー所有ファイルへのオープンが保護設定に拒否されたと判断。デプロイのtruncateに`--no-create`を追加し、既存ログのみ処理するよう修正した。ログ権限・所有者・カーネル設定は変更しない。ファイルが消えた場合もroot所有のログを再作成しない。
+
+今回の失敗位置はサービス再起動より後なので、デプロイ失敗でも設定配置・サービス再起動が既に実行されている点に注意。修正後の実環境でのtruncate・再デプロイは未実行。
+
+検証：`python3 -m unittest discover -s isutools/tests -p 'test_remote_bootstrap.py'`の44件成功。ファイル作成を要求するtruncateを拒否する回帰テストを追加した。

@@ -91,7 +91,8 @@ def remote_deploy(config, host):
         for key in ['NGINX_LOG', 'SLOW_LOG']:
             log = Path(config.require(key))
             if config.sudo('test', '-e', log, check=False).returncode == 0:
-                config.sudo('truncate', '-s', '0', log)
+                # O_CREATを使うとstickyディレクトリでfs.protected_regularに拒否される。
+                config.sudo('truncate', '--no-create', '-s', '0', log)
                 # PostgreSQLログはpostgresグループ経由で読み、0640を維持する。
                 if key == 'SLOW_LOG' and db_service.startswith('postgresql'):
                     continue

@@ -131,6 +131,19 @@ class RemoteDeployTests(Sandbox):
         self.assertEqual(log.stat().st_mode & 0o777, 0o640)
         self.assertEqual(log.stat().st_size, 0)
 
+    def test_truncate_does_not_request_file_creation(self):
+        # protected_regular=2を想定し、O_CREATを伴うtruncateを拒否する。
+        directory = self.work / 'local/node/bin'
+        real_truncate = shutil.which('truncate')
+        self.assertIsNotNone(real_truncate)
+        write(directory / 'truncate', '#!' + sys.executable + '\nimport os, sys\n'
+              'if "--no-create" not in sys.argv: sys.exit(1)\n'
+              f'os.execv({real_truncate!r}, ["truncate", *sys.argv[1:]])\n')
+        (directory / 'truncate').chmod(0o755)
+        self.deploy()
+        self.assertEqual((self.logs / 'nginx/access.log').stat().st_size, 0)
+        self.assertEqual((self.logs / 'mysql/slow.log').stat().st_size, 0)
+
     def test_log_checks_do_not_stat_as_unprivileged_user(self):
         from unittest.mock import patch
         from isutools.lib.remote import remote_deploy
