@@ -12,4 +12,6 @@ UNIQUE索引を必要としない。以前のON CONFLICT版は実行先に索引
 
 ## 検証
 
+通知対象との排他を維持するため、現在は登録時に[通知対象の共有advisory lock](notification-membership-lock.md)も取得する。正常登録はBEGIN/COMMIT込み5往復。名前単位の一意性確認方式は変わらない。
+
 UNIQUE索引のない新規ローカルPostgreSQLで、同名8並列登録が201×1・409×7になることと登録SQLが2件になることを検証する。競技ベンチによるスコア比較は未実施。

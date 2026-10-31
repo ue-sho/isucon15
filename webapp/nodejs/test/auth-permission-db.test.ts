@@ -91,7 +91,7 @@ test("認証・権限・RETURNING / 新規ローカルPostgreSQL", { skip: !port
       sqls.length = 0;
       const response = await request("/register", "", "POST", { username: name, displayName: name, region: "asia" });
       assert.equal(response.status, 201, await response.clone().text());
-      assert.equal(sqls.length, 2);
+      assert.equal(sqls.length, 3);
       const body = await response.json();
       secrets.set(name, body.secretKey);
       sqls.length = 0;
@@ -164,7 +164,7 @@ test("認証・権限・RETURNING / 新規ローカルPostgreSQL", { skip: !port
     sqls.length = 0;
     let response = await request("/me", tokens.get("viewer")!, "PATCH", { displayName: "updated", bio: "", region: "europe" });
     assert.equal(response.status, 200, await response.clone().text());
-    assert.equal(sqls.length, 2);
+    assert.equal(sqls.length, 3);
     assert.equal((await response.json()).region, "europe");
     assert.equal((await (await request("/me", tokens.get("viewer")!)).json()).displayName, "updated");
     response = await request("/me", tokens.get("viewer")!, "PATCH", { region: "asia" });
