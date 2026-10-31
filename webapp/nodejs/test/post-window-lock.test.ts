@@ -14,6 +14,7 @@ import type { Config } from "../src/config.ts";
 import { DB, type Tx } from "../src/db.ts";
 import { getFeedHandler } from "../src/feed_api.ts";
 import { IPBanList } from "../src/ip_ban.ts";
+import { decodeJPEG } from "../src/jpeg.ts";
 import { createPostHandler, deletePostHandler } from "../src/post_api.ts";
 import type { Env } from "../src/server.ts";
 import { loginHandler, registerHandler, updateMeHandler } from "../src/user_api.ts";
@@ -126,6 +127,11 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     });
     const context = { db, config, ipBans: new IPBanList() };
     app.post("/api/posts", createPostHandler(context));
+    // e752f2c's immediate image preparation, with the identical four DB calls.
+    app.post("/test/e752/posts", createPostHandler(context, async (image) => {
+      const data = Buffer.from(await image.arrayBuffer());
+      return { data, image: decodeJPEG(data) };
+    }));
     app.post("/test/legacy/posts", legacyCreatePostHandler(context));
     app.delete("/api/posts/:postId", deletePostHandler(context));
     app.post("/api/admin/posting-window", openPostingWindowHandler(context));
@@ -717,5 +723,81 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
           Number((rows.reduce((sum, row) => sum + row[key as keyof typeof row], 0) / rows.length).toFixed(3))]))]));
       st.diagnostic(`synthetic per-SQL return delay=${delay}ms; 1 warmup + 4 samples/mode; ${JSON.stringify(means)}`);
     }
+  });
+
+  await t.test("multipart decode burst: ready DB replies and friends feed progress between image preparations", async (st) => {
+    const pixels = Buffer.alloc(512 * 512 * 4);
+    let seed = 42;
+    for (let i = 0; i < pixels.length; i += 4) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      pixels[i] = seed & 255; pixels[i + 1] = (seed >>> 8) & 255; pixels[i + 2] = (seed >>> 16) & 255; pixels[i + 3] = 255;
+    }
+    const burstImage = jpeg.encode({ data: pixels, width: 512, height: 512 }, 80).data;
+    assert.ok(decodeJPEG(burstImage)); // warm the same decoder before either mode
+    const measurements: Record<string, { post: number; feed: number; timer: number; lock: number; burst: number }[]> = { immediate: [], fair: [] };
+    for (const mode of ["immediate", "fair", "fair", "immediate"] as const) {
+      const f = await fixture(st);
+      await f.control.query(`CREATE TABLE preparation_timing(user_id text, xid xid, locked_at timestamptz)`);
+      const up = await readFile(new URL("../../sql/migrations/20261031-post-db-call.up.sql", import.meta.url), "utf8");
+      await f.control.query(up.replace("FOR NO KEY UPDATE;", `FOR NO KEY UPDATE;
+        INSERT INTO preparation_timing VALUES(p_user_id, pg_current_xact_id()::text::xid, clock_timestamp());`));
+      await f.control.query(`INSERT INTO users(id,username,secret_key_hash,display_name,region)
+        SELECT 'burst-'||i,'burst-'||i,repeat('0',64),'Synthetic','asia' FROM generate_series(1,8) AS i`);
+      const path = mode === "immediate" ? "/test/e752/posts" : "/api/posts";
+      assert.equal((await f.post("bob", path)).status, 201);
+      const prepared = Promise.withResolvers<void>();
+      let initialPost = true;
+      f.db.hook = async (e) => {
+        if (e.phase === "after" && isPrepare(e.sql) && e.args[0] === "alice" && initialPost) {
+          initialPost = false;
+          prepared.resolve();
+          // Same small application-side wait in both modes; another request's
+          // image preparation must not turn this into a whole burst's delay.
+          await sleep(30);
+        }
+      };
+      const posting = f.post("alice", path);
+      await within(prepared.promise);
+      const started = performance.now();
+      const timer = sleep(10).then(() => performance.now() - started - 10);
+      const feed = f.request("/api/feeds/friends", {}, "bob").then(r => ({ response: r, elapsed: performance.now() - started }));
+      const burst = Array.from({ length: 8 }, (_, i) => f.post(`burst-${i + 1}`, path, { image: burstImage }));
+      const first = await posting;
+      const postMs = performance.now() - started;
+      assert.equal(first.status, 201);
+      assert.ok((await Promise.all(burst)).every(r => r.status === 201));
+      const burstMs = performance.now() - started;
+      const feedResult = await feed;
+      assert.equal(feedResult.response.status, 200);
+      assert.deepEqual(await f.counts(), { posts: 10, images: 10, deleted: 0 });
+      const lock = (await f.control.query(`SELECT
+        (extract(epoch FROM (pg_xact_commit_timestamp(xid)-locked_at))*1000)::float8 AS ms
+        FROM preparation_timing WHERE user_id='alice'`)).rows[0].ms;
+      measurements[mode].push({ post: postMs, feed: feedResult.elapsed, timer: await timer, lock, burst: burstMs });
+    }
+    st.diagnostic(`same four SQL calls; 8 concurrent real 512x512 JPEG uploads; ABBA; ${JSON.stringify(measurements)}`);
+  });
+
+  await t.test("failed image preparation does not poison later queued posts or acquire DB locks", async (st) => {
+    const f = await fixture(st);
+    const readImage = File.prototype.arrayBuffer;
+    let fail = true;
+    let began = 0;
+    st.mock.method(File.prototype, "arrayBuffer", function (this: File) {
+      if (fail) { fail = false; return Promise.reject(new Error("synthetic image read failure")); }
+      return readImage.call(this);
+    });
+    f.db.hook = (e) => { if (e.phase === "before" && e.sql === "BEGIN") began++; };
+    const failed = await f.post();
+    assert.equal(failed.status, 500);
+    assert.deepEqual(await failed.json(), { error: "synthetic image read failure" });
+    assert.equal(began, 0);
+    const results = await Promise.all([
+      f.post("alice", "/api/posts", { image: new Uint8Array([1, 2, 3]) }),
+      f.post("alice"),
+    ]);
+    assert.deepEqual(results.map(r => r.status), [400, 201]);
+    assert.equal(began, 1);
+    assert.deepEqual(await f.counts(), { posts: 1, images: 1, deleted: 0 });
   });
 });

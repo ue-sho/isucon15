@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { setImmediate as yieldToIO } from "node:timers/promises";
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
 import { must, type Row } from "./db.ts";
 import { signedImageURL } from "./image_signature.ts";
-import { decodeJPEG } from "./jpeg.ts";
+import { decodeJPEG, type JPEGImage } from "./jpeg.ts";
 import { getPostPermissions, postColumns, postFromRow, getPost, getPostWithAuthor, selectPostsWithAuthor, validLocation, type Post, type PostLocation } from "./post.ts";
 import { getPostingWindow } from "./posting_window.ts";
 import { jsonResponse, noContent } from "./response.ts";
@@ -53,7 +54,26 @@ export type PostResponse = {
   lateSeconds: number;
 };
 
-export function createPostHandler(h: HandlerContext): Handler<Env> {
+type PreparedImage = { data: Buffer; image: JPEGImage | null };
+type PrepareImage = (image: File) => Promise<PreparedImage>;
+
+function createImagePreparer(): PrepareImage {
+  // Yield to I/O between serial image preparations. Multipart completions can
+  // otherwise run decodes back-to-back while ready DB replies wait in poll.
+  // This request holds no DB connection or row lock while waiting here.
+  let preparation = Promise.resolve();
+  return (image) => {
+    const prepared = preparation.then(async () => {
+      await yieldToIO();
+      const data = Buffer.from(await image.arrayBuffer());
+      return { data, image: decodeJPEG(data) };
+    });
+    preparation = prepared.then(() => {}, () => {});
+    return prepared;
+  };
+}
+
+export function createPostHandler(h: HandlerContext, prepareImage = createImagePreparer()): Handler<Env> {
   return async (c) => {
     const input = await bind(c, createPostRequest);
     if (input.image === null || !validUserText(input.caption, 0, 1000)) {
@@ -76,8 +96,7 @@ export function createPostHandler(h: HandlerContext): Handler<Env> {
     if (!validLocation(location)) {
       throw new APIError(400, "invalid_post");
     }
-    const imageData = Buffer.from(await input.image.arrayBuffer());
-    const img = decodeJPEG(imageData);
+    const { data: imageData, image: img } = await prepareImage(input.image);
     if (!img) {
       throw new APIError(400, "invalid_post");
     }
