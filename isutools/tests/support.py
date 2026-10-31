@@ -45,7 +45,7 @@ class Sandbox(unittest.TestCase):
 
     def make_repo(self, root):
         shutil.copytree(ROOT / 'isutools', root / 'isutools', dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns('tests', 'node_modules', '__pycache__', '.bootstrap', 'initial-state.json'))
+                        ignore=shutil.ignore_patterns('tests', 'node_modules', '__pycache__', '.bootstrap', 'initial-state.json', 'image-cache-deploy.json'))
         shutil.copy(ROOT / '.gitignore', root / '.gitignore')
         shutil.copy(ROOT / 'Taskfile.yml', root / 'Taskfile.yml')
         path = root / 'isutools/config.env'

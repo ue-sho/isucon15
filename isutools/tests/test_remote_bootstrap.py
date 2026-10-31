@@ -94,6 +94,20 @@ class RemoteDeployTests(Sandbox):
         self.deploy()
         self.assertNotIn('systemctl restart postgresql', self.calls())
 
+    def test_image_redis_requires_coordinated_deploy_and_defers_all_api_start(self):
+        write(self.work / 'isutools/image-cache-deploy.json', '{"redis_host":"s1"}')
+        result = self.deploy(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('全ホスト調整経路', result.stdout)
+        self.assertNotIn('systemctl restart', self.calls())
+        write(self.hosts / 's1/enabled', 'mysql\nnginx\nisuapp-node.service\nisureal-image-redis.service\n')
+        self.env['ISUTOOLS_IMAGE_CACHE_COORDINATED'] = '1'
+        self.deploy()
+        self.assertIn('systemctl enable isureal-image-redis.service', self.calls())
+        self.assertIn('systemctl restart isureal-image-redis.service', self.calls())
+        self.assertNotIn('systemctl restart isuapp-node.service', self.calls())
+        self.assertNotIn('systemctl is-active isuapp-node.service', self.calls())
+
     def test_postgresql_health_failure_stops_before_app_restart(self):
         service = 'postgresql@16-main.service'
         with (self.work / 'isutools/config.env').open('a') as file:

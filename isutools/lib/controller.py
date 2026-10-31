@@ -150,8 +150,14 @@ def deploy(config, branch=None, benchmark=False):
             (directory / f'{host}.log').write_text(result.stdout)
             return result.stdout
 
-        with ThreadPoolExecutor(max_workers=len(hosts)) as pool:
-            logs = dict(zip(hosts, pool.map(one, hosts)))
+        from . import image_cache_deploy
+        image_plan = image_cache_deploy.target_plan(config, revision)
+        if image_plan:
+            print('▶ 画像キャッシュ: 全API停止 → 設定/Redis適用 → 世代更新 → 全API起動', flush=True)
+            logs = image_cache_deploy.deploy(config, image_plan, revision, branch, owner, directory)
+        else:
+            with ThreadPoolExecutor(max_workers=len(hosts)) as pool:
+                logs = dict(zip(hosts, pool.map(one, hosts)))
         summary, failed = format_summary(branch, sha, logs)
         print(summary, flush=True)
         notify(config, header + '\n' + summary)
@@ -169,7 +175,9 @@ def deploy(config, branch=None, benchmark=False):
             print('⚠ ポータルで終了を確認した後、task unlock で解除してください', file=sys.stderr)
         else:
             unlock_all(config, hosts)
-            if directory is not None:
+            if directory is not None and (directory / 'image-cache-failed').exists():
+                print(f'⚠ 画像キャッシュの失敗記録を保持します: {directory}', file=sys.stderr)
+            elif directory is not None:
                 shutil.rmtree(directory)
 
 
@@ -187,7 +195,7 @@ commit = result.stdout.strip() if result.returncode == 0 else '-'
 state = root / '.isutools'
 lock = state / 'deploy.lock/owner'
 owner = lock.read_text().strip().rsplit(' ', 1)[0] if lock.exists() else '-'
-services = f'app={active(APP)} nginx={active("nginx")} db={active(DB)} agent={active("pprotein-agent.service")} lock={owner}'
+services = f'app={active(APP)} nginx={active("nginx")} db={active(DB)} agent={active("pprotein-agent.service")} lock={owner} redis={active("isureal-image-redis.service")}'
 record = state / 'last-deploy'
 if record.exists():
     fields = dict(line.split('=', 1) for line in record.read_text().splitlines() if '=' in line)

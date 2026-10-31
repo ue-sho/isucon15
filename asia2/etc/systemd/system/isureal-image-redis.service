@@ -1,5 +1,4 @@
-# Optional template. Installation, service start and network access require
-# coordinating the target hosts and timing; existing deploy does not use this.
+# Started before API writers by the coordinated image-cache deployment.
 [Unit]
 Description=ISUReal image authorization Redis
 After=network-online.target

@@ -1,0 +1,13 @@
+{
+  "redis_host": "asia2",
+  "redis_address": "192.168.4.10",
+  "redis_port": 6380,
+  "cache_reads": true,
+  "ports": {"isureal-nodejs.service": 8080, "isureal-nodejs-europe.service": 8081, "isureal-nodejs-america.service": 8082},
+  "services": {
+    "asia1": ["isureal-nodejs.service", "isureal-nodejs-europe.service", "isureal-nodejs-america.service"],
+    "europe1": ["isureal-nodejs.service"],
+    "america1": ["isureal-nodejs.service"],
+    "asia2": ["isureal-nodejs.service"]
+  }
+}

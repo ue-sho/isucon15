@@ -24,6 +24,9 @@ def parser():
     command.add_argument('text')
     command = commands.add_parser('remote-deploy')
     command.add_argument('host')
+    command = commands.add_parser('image-cache-phase')
+    command.add_argument('host')
+    command.add_argument('phase', choices=['stop', 'install', 'secret', 'credentials', 'prepare', 'check', 'start', 'record'])
     commands.add_parser('bootstrap-import')
     commands.add_parser('render')
     return result
@@ -55,6 +58,9 @@ def main(argv=None):
     if args.command == 'remote-deploy':
         from .lib.remote import remote_deploy
         return remote_deploy(config, args.host)
+    if args.command == 'image-cache-phase':
+        from .lib.image_cache_deploy import remote_phase
+        return remote_phase(config, args.host, args.phase)
     if args.command in ('bootstrap', 'bootstrap-import'):
         from .lib.bootstrap import bootstrap, bootstrap_import
         return bootstrap(config, args.branch or config.get('ISUTOOLS_BRANCH') or None) if args.command == 'bootstrap' else bootstrap_import(config)

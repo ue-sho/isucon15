@@ -77,7 +77,7 @@ GitHub CLIが未認証のためIssueへの転記は未実施。
 
 ### 通常経路と整合性
 
-`ISUREAL_IMAGE_AUTH_REDIS_URL` を設定すると、画像の状態を変えるAPIにRedisの無効化処理を追加する。`ISUREAL_IMAGE_AUTH_CACHE_READS=1` も設定したファイル配信アプリだけが、検証済みURLを再利用する。両方とも既定では無効。
+`ISUREAL_IMAGE_AUTH_REDIS_URL` を設定すると、画像の状態を変えるAPIにRedisの無効化処理を追加する。`ISUREAL_IMAGE_AUTH_CACHE_READS=1` も設定したファイル配信アプリだけが、検証済みURLを再利用する。アプリの環境変数の既定値は無効だが、下記の調整付きデプロイは認証付きURLと有効化設定を配置する。
 
 - 画像ID・expの文字列・sigの完全な組のSHA-256をキーにする。共有するのは配信URI・MIME・所有者スコープ・無効化世代で、秘密鍵・画像本体は保存しない。成功した検証だけを、最大60秒かつURLの期限まで登録する。命中ごとにRedisが現在の所有者・全体の世代と更新中マーカーをLuaで照合する。命中時は署名の反復計算と画像SQLを省き、ローカルファイルを確認して `X-Accel-Redirect` を返す。パラメータ形式・重複・期限・返却直前の期限は毎回検証する。
 - 未登録・失効・Redisエラー・ファイルなしは従来のDB検証へ戻す。DB検証前に所有者と全体の世代を取得し、登録時にも一致を要求する。所有者検索と世代取得の間の鍵変更も、検証SQLで鍵のSHA-256・署名キャッシュ世代を再照合して拒否する。無関係な所有者の更新が続いていても登録できる。
@@ -90,18 +90,24 @@ GitHub CLIが未認証のためIssueへの転記は未実施。
 
 ### Redisの配置と切り替え
 
-Redisはasia2への追加を想定するが、CPU・メモリ・ディスクの余力、実アドレス、認証、ポータルの接続先との照合は未実施。`isutools/templates/image-authorization-redis.conf` と同名の `.service` は手動構築用のテンプレートで、既存deployからは配布・有効化しない。実機へのRedis導入、認証設定、ネットワーク設定、サービス切り替えは対象と実施順を合わせてから行う。
+ユーザーの依頼で `asia2/etc/isureal-image-redis/redis.conf` と `asia2/etc/systemd/system/isureal-image-redis.service` を正とし、手動用テンプレートを廃止した。読み取りSSHでasia2の実アドレス `192.168.4.10` を確認済み。Redisはloopbackとこのアドレスの6380番で待ち受ける。既存ルーター経由の通信を維持し、ルーターやファイアウォールは変更しない。CPU・メモリ・I/Oの余力と本番疎通・起動はまだ未確認。
 
-1. 専用Redisを構築する。接続は既存ルーター経由の経路を維持し、到達範囲と認証を限定する。テンプレートのbindはloopbackだけであり、照合済みのアプリ向けアドレスを別途設定する。認証情報はGitやコマンド出力に載せない。
-2. `appendonly yes`、`appendfsync always`、`no-appendfsync-on-rewrite no`、`aof-load-truncated no`、`save ""`、`maxmemory-policy noeviction` を維持する。アプリは起動時にこれらを確認する。**Redisは判定のキャッシュだけでなく、更新中マーカーも保持するため、通常の揮発性キャッシュとして扱わない。** AOFの古いバックアップへの巻戻し、マーカーの削除、追い出し、稼働中のFLUSH等は禁止。[Redis公式の永続化説明](https://redis.io/docs/latest/management/persistence/)のとおりalwaysは毎回のfsyncを伴うため、asia2のI/Oへの影響も確認する。
-3. 全画像関連の書き込みを止めた状態で、保護された環境設定からURLを読み込み、空の専用Redisに対して `node src/provision_image_authorization_cache.ts --all-writers-stopped` を一度実行する。非空DBや不適切な設定では拒否し、通常のアプリ起動は状態を新規作成しない。
-4. 全APIプロセスへ同じ新版と同じRedis URLを設定する。最初は全て `ISUREAL_IMAGE_AUTH_CACHE_READS=0` とし、DB検証を続けながら無効化処理だけを有効にする。asia1/europe1/america1のメインだけでなく、地域別APIサービス・asia2など書き込みを受け得る全プロセスを確認する。ファイルキャッシュのないプロセスにもRedis URLは必要。
-5. 旧プロセスと旧DBトランザクションの終了、全ての書き込み経路への無効化処理の反映を確認してから、ファイル配信を行うプロセスで `ISUREAL_IMAGE_AUTH_CACHE_READS=1` を有効にする。混在中にキャッシュから配信しない。
-6. 初期化、画像・退会・差し替え・公開範囲・関係変更・履歴・export・再起動後の取得を確認する。ユーザーが実行する実ベンチで命中率、asia1のCPU、asia2のCPU・メモリ・AOFの書込待ち、画像関連更新のレイテンシと503、得点を比較する。
+この版のツールをcheckoutした作業ツリーから `task deploy BRANCH=perf/image-authorization-redis` を実行すると、push済み版の `isutools/image-cache-deploy.json` を使って次を行う。旧版のツールからの直接remote-deployは拒否する。**通常の並列デプロイと異なり、この版はデプロイ中に全APIを一時停止する。** ベンチや他メンバーの作業が動いていない時間に実行する。
 
-戻すときは、まず**全ての読み取り側で** `ISUREAL_IMAGE_AUTH_CACHE_READS=0` にしてDB検証へ戻す。その完了後にRedis URLを外して無効化処理を停止できる。キャッシュを読むプロセスが残っている間に、更新側の無効化処理だけを停止しない。
+1. 全ホストを同じSHAへcheckoutし、asia1の3 APIとeurope1/america1/asia2の各メインAPIを停止する。
+2. asia2にRedisが未導入ならaptで `redis-server` / `redis-tools` を導入する。今回新規に導入したデフォルトサービスだけを停止・無効化し、専用の `isureal-image-redis.service` を使う。既存Redisがある場合は再導入も既存サービスの停止も行わない。
+3. 初回だけ64桁のランダムな認証情報を作成し、asia2の `/etc/isureal-image-redis/deploy.secret`（root:root、0600）で保持する。以後は同じ値を使う。認証情報はSSHの標準入力で配布し、コマンド引数・Git・デプロイログに載せない。Redis用 `auth.conf` はroot:redis 0640、全ホストの `client.env` はroot:isucon 0640で配置する。
+4. 各ホストの `/etc`・アプリ依存を反映する。Redisの設定を適用し、専用サービスをenable・再起動する。APIはこの段階では起動しない。データは `/var/lib/isureal-image-redis` のAOFに保持し、再デプロイでも削除しない。
+5. asia2からDBの同一ユーザーの既存接続が全て終了したことを確認する。初回は制御状態を作成し、次回以降は全体の世代を更新して旧判定と残存マーカーを無効化する。画像・ユーザー・投稿のDBデータは変更しない。DB接続が残れば失敗させ、状態を更新しない。
+6. 全ホストで認証付きRedis接続と設定・制御状態を検証する。成功後に各メインAPIをenableし、全APIを起動する。各サービスのactiveと、8080/8081/8082の該当APIのHTTP応答を確認する。途中で失敗したら全APIを停止し、秘匿情報を含まないホストログをローカルの `isutools-deploy-*` に保持する。停止時に作る `/etc/isureal-image-redis/deploy-in-progress` とsystemdのConditionで、不完全なデプロイが再起動後に自動復帰することも防ぐ。マーカーは全準備が成功した起動段階でだけ削除する。
 
-残存マーカーは自動で解除しない。復旧は全書き込みとキャッシュ読み取りを止め、旧DBトランザクションも終了したことを確認した作業時間に限定する。必要な記録を保存し、専用Redisの状態を空に戻す操作の許可を得て再provisionする。画像・投稿の永続データはDBから復元できるが、稼働中に状態を消すだけでは整合性を保証できない。
+Redisは `appendonly yes`、`appendfsync always`、`no-appendfsync-on-rewrite no`、`aof-load-truncated no`、`save ""`、`maxmemory-policy noeviction` を維持する。**Redisは更新中マーカーも保持するため、揮発性キャッシュとして扱わない。** AOFの巻戻しや稼働中のFLUSH等は禁止。[Redis公式の永続化説明](https://redis.io/docs/latest/management/persistence/)のとおりalwaysは毎回のfsyncを伴うため、asia2のI/Oへの影響も確認する。
+
+再起動時は、enableされたRedisと各メインAPIが自動起動する。asia2のメインAPIはRedisへのWants/Afterを持ち、asia1の補助APIは既存のメインAPIのWantsから起動する。Redisがまだ準備できない場合はアプリの `Restart=on-failure` / `RestartSec=5` で再試行する。**通常のサービス・OS再起動では初期化や制御状態の作り直しを実行しない。** 残存マーカーは安全側に残り、該当画像はDBで確認する。マーカーの解消は上記の全API停止・DB接続終了を確認する次回デプロイで行える。
+
+戻すときはmanifestの `cache_reads` をfalseにした版をコミット・pushし、同じ調整付きデプロイで全読み取りをDBへ戻す。その後に旧版へ戻す場合も全APIを停止してから反映し、旧版に存在しない `image-authorization.conf` が `/etc` に残ることに注意する（rsyncは削除しない）。キャッシュから配信するプロセスが残る間に更新側だけを旧版へ戻さない。
+
+反映後は初期化、削除・退会・差し替え・公開範囲・関係変更・履歴・export・再起動後の取得を確認し、実ベンチで命中率、asia1/asia2のCPU、AOFの書込待ち、503と得点を比較する。
 
 ### ローカル検証
 
@@ -121,3 +127,5 @@ IMAGE_AUTH_CPU_BENCH=1 IMAGE_AUTH_NGINX_TEST=1 sh test/helpers/run-image-authori
 合成CPU比較は250要求を1組として順序を交互に5組ずつ測定し、既存の1 SQL経路とRedis命中経路を比較した。main統合前はNodeプロセスのCPU時間中央値が108.732ms → 86.189ms（約20.7%減）、統合後の再計測は95.458ms → 79.850ms（約16.4%減）、経過時間中央値は228.133ms → 113.517msだった。画像SQLは各1,250要求で1,250回 → 0回。URLの生成は計測外、実データは使用していない。Redis・PostgreSQL・nginxプロセスのCPUはこのCPU時間に含まない。raw結果は `/tmp/isu15-image-authorization-final.log`（統合前）と `/tmp/isu15-image-authorization-integrated.log`（統合後）、通常試験の成功結果は `/tmp/isu15-image-authorization-all-tests-verified.log` に保存し、実環境の低下率として扱わない。
 
 未確認: 本番でのキャッシュ命中率、全APIの実配置、初期化60秒以内、Redis追加後の全体CPU・I/O・得点。CPU比較は同じ有効URLの連続取得に限定した合成計測であり、JPEG検証やフィードの署名生成はこの変更で省略しない。実装・検証の共有先はPR #64と関連Issue #37。
+
+デプロイ自動適用・再起動対応の追補: 運用ツール全体133件成功（3skip）、追加の調整順序・秘密情報の非表示・失敗時の停止・自動起動・停止マーカーの試験7件成功。画像配信は実Redis/PG16/nginxで17件成功（今回はCPU比較を省略し、DB接続が残る間のデプロイ準備拒否と、全API停止後の繰り返し準備を追加）。型検査も成功。結果は `/tmp/isu15-image-cache-tools-final.log` と `/tmp/isu15-image-cache-deploy-integration.log`。実サーバーではasia2のIP・Redis未導入・API稼働の読み取り確認のみで、パッケージ導入・秘密情報の作成・デプロイ・サービス/OS再起動は行っていない。systemdの起動設定はコードと偽サービスで確認したもので、実機再起動試験の成功とは区別する。

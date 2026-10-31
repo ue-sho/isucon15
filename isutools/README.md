@@ -149,6 +149,10 @@ task pprotein
 
 ## 開発と構成
 
+`isutools/image-cache-deploy.json` を含む版は、`task deploy` で画像Redisも反映する。全API停止 → 認証情報・設定配置 → Redis起動 → DB接続終了確認・世代更新 → 全ホストのRedis疎通確認 → API起動の順序で、一時的なAPI停止を伴う。初回はasia2にRedisを導入し、専用サービスとメインAPIを自動起動に設定する。通常の再起動ではRedisのAOF・制御状態を消さない。実行にはこの版のツールをcheckoutした作業ツリーを使う。
+
+失敗時は全APIを停止したままログを保持する。対象サービス、秘密情報の保存場所、復旧・戻し方は [画像Redisの反映手順](../docs/nginx-image-files.md#redisの配置と切り替え) を参照する。現在の実装作業では本番への設定配置・Redis導入・再起動・デプロイは実行していない。
+
 ```sh
 task test:python       # Python標準unittest。追加パッケージ不要
 task test:inventory    # 構成調査だけ（inspect:testも同じタスクの別名）

@@ -27,6 +27,7 @@ test("画像認可キャッシュの地域間整合性・競合・障害", { ski
   assert.match(redisPort!, /^\d+$/);
   assert.match(pgPort!, /^\d+$/);
   const redisURL = `redis://127.0.0.1:${redisPort}`;
+  let activeRedisURL = redisURL;
   const redis = createClient({ url: redisURL, socket: { reconnectStrategy: false } });
   redis.on("error", () => {});
   await redis.connect();
@@ -49,7 +50,8 @@ test("画像認可キャッシュの地域間整合性・競合・障害", { ski
   };
   const admin = new pg.Client({ host: config.dbHost, port: Number(pgPort), user: config.dbUser, database: config.dbName });
   await admin.connect();
-  t.after(() => admin.end());
+  let adminClosed = false;
+  t.after(() => adminClosed ? undefined : admin.end());
   assert.equal((await admin.query("SELECT count(*) FROM pg_tables WHERE schemaname='public'")).rows[0].count, "0", "requires a fresh dedicated PostgreSQL DB");
   await admin.query(await readFile(new URL("../../sql/001-schema.sql", import.meta.url), "utf8"));
   const bytes = jpeg.encode({ data: Buffer.from([255, 0, 0, 255]), width: 1, height: 1 }, 80).data;
@@ -384,6 +386,7 @@ test("画像認可キャッシュの地域間整合性・競合・障害", { ski
       const restartedPort = execFileSync("docker", ["port", container, "6379"], { stdio: "pipe" }).toString().trim().split(":").at(-1)!;
       assert.match(restartedPort, /^\d+$/);
       const restored = new ImageAuthorizationCache(`redis://127.0.0.1:${restartedPort}`);
+      activeRedisURL = `redis://127.0.0.1:${restartedPort}`;
       await restored.connect();
       const params = new URL(url("reaction"), "http://test").searchParams;
       assert.equal((await restored.lookup("reaction", String(exp), params.get("sig")!))?.image, undefined);
@@ -404,6 +407,29 @@ test("画像認可キャッシュの地域間整合性・競合・障害", { ski
     assert.ok(imageQueries >= 1);
     assert.equal((await app.request("/write", { method: "POST" })).status, 503);
     assert.equal(writes, 0);
+  });
+
+  await t.test("デプロイ準備はDB接続が残れば拒否し、全API停止後だけ世代と残存gateを更新", async () => {
+    const script = new URL("../src/prepare_image_authorization_deployment.ts", import.meta.url).pathname;
+    const options = { env: { ...process.env, ISUREAL_DB_HOST: '127.0.0.1', ISUREAL_DB_PORT: pgPort!,
+      ISUREAL_DB_USER: 'postgres', ISUREAL_DB_PASSWORD: '', ISUREAL_DB_NAME: config.dbName,
+      ISUREAL_IMAGE_AUTH_REDIS_URL: activeRedisURL }, stdio: 'pipe' as const };
+    assert.throws(() => execFileSync(process.execPath, [script, '--all-writers-stopped'], options));
+    for (const cache of caches) cache.close();
+    for (const db of databases.splice(0)) await db.end();
+    await admin.end(); adminClosed = true;
+    const client = new ImageAuthorizationCache(activeRedisURL);
+    await client.connect();
+    try {
+      await client.beginMutation('reactor');
+      execFileSync(process.execPath, [script, '--all-writers-stopped'], options);
+      const params = new URL(url('profile'), 'http://test').searchParams;
+      const lookup = await client.lookup('profile', String(exp), params.get('sig')!);
+      assert.equal(lookup?.image, undefined);
+      assert.ok(await client.snapshot(lookup!, 'reactor'), 'orphaned gates are cleared only after quiescence');
+      execFileSync(process.execPath, [script, '--all-writers-stopped'], options);
+      assert.ok(await client.snapshot(lookup!, 'reactor'), 'repeated deployment preparation is safe');
+    } finally { client.close(); }
   });
 
 });

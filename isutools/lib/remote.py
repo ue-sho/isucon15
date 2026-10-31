@@ -12,8 +12,17 @@ def commit(config):
     return result.stdout.strip() if result.returncode == 0 else 'unknown'
 
 
+def record_deploy(config):
+    write(config.server_root / '.isutools/last-deploy', f'deployer={config.get("DEPLOYER", "unknown")}\n'
+          f'branch={config.get("DEPLOY_BRANCH", "unknown")}\ncommit={commit(config)}\nat={int(time.time())}\n')
+
+
 def remote_deploy(config, host):
     root = config.root
+    image_manifest = root / 'isutools/image-cache-deploy.json'
+    coordinated = config.get('ISUTOOLS_IMAGE_CACHE_COORDINATED') == '1'
+    if image_manifest.is_file() and not coordinated:
+        raise ToolError('画像Redis設定を含む版は task deploy の全ホスト調整経路で反映してください')
     state = config.server_root / '.isutools'
     state.mkdir(parents=True, exist_ok=True)
     paths = sorted(config.server_root.glob('local/*/bin'))
@@ -60,6 +69,10 @@ def remote_deploy(config, host):
             config.sudo('nginx', '-t')
         step = 'restart'
         config.sudo('systemctl', 'daemon-reload')
+        if coordinated:
+            from .image_cache_deploy import apply_redis
+            step = 'image-redis'
+            apply_redis(config, host)
         db_service = config.require('DB_SERVICE')
         if enabled(db_service):
             step = 'db-restart'
@@ -72,11 +85,15 @@ def remote_deploy(config, host):
             print(f'▶ {db_service} はこのホストで無効です（再起動していません）')
         step = 'restart'
         for service in ['nginx', config.require('APP_SERVICE')]:
+            if coordinated and service == config.require('APP_SERVICE'):
+                continue
             if enabled(service):
                 config.sudo('systemctl', 'restart', service)
         step = 'app-health'
         service = config.require('APP_SERVICE')
-        if enabled(service):
+        if coordinated:
+            print('▶ 全ホストの画像キャッシュ準備完了までAPIの起動を保留します')
+        elif enabled(service):
             time.sleep(float(config.get('ISUTOOLS_HEALTH_WAIT', '3')))
             if config.run(['systemctl', 'is-active', service], capture=True, check=False).returncode:
                 config.sudo('journalctl', '-u', service, '-n', '20', '--no-pager', check=False)
@@ -114,8 +131,8 @@ def remote_deploy(config, host):
                 config.sudo('chmod', '+r', log)
                 config.sudo('chmod', '+rx', log.parent)
         step = 'record'
-        write(state / 'last-deploy', f'deployer={config.get("DEPLOYER", "unknown")}\n'
-              f'branch={config.get("DEPLOY_BRANCH", "unknown")}\ncommit={commit(config)}\nat={int(time.time())}\n')
+        if not coordinated:
+            record_deploy(config)
         success = True
     finally:
         print(f'ISUTOOLS_RESULT status={"ok" if success else "ng"} build={seconds} '

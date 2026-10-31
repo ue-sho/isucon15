@@ -109,6 +109,26 @@ export class ImageAuthorizationCache {
     } finally { cache.close(); }
   }
 
+  // Only after every API writer has stopped and its DB connections have drained.
+  // A new global epoch invalidates all old entries, including in-flight tickets.
+  static async prepareDeployment(url: string): Promise<void> {
+    const cache = new ImageAuthorizationCache(url);
+    try {
+      await cache.#connectAndCheckConfiguration();
+      const epoch = randomUUID();
+      await cache.#client.eval(`
+        if redis.call('DBSIZE') ~= 0 and redis.call('HGET', KEYS[1], 'schema') ~= '1' then
+          return redis.error_reply('unknown image cache state')
+        end
+        redis.call('HSET', KEYS[2], 'schema', '1', 'revision', ARGV[1], 'total', '0', 'epoch:*', ARGV[1])
+        redis.call('RENAME', KEYS[2], KEYS[1])
+        return 1
+      `, { keys: [imageAuthorizationControlKey, imageAuthorizationControlKey + ":prepare:" + epoch], arguments: [epoch] });
+    } catch {
+      throw new Error("image authorization deployment preparation failed; keep API writers stopped");
+    } finally { cache.close(); }
+  }
+
   async #connectAndCheckConfiguration(): Promise<void> {
     // Bound initial startup even though established connections reconnect.
     const timeout = setTimeout(() => this.close(), 1500);
