@@ -22,8 +22,8 @@ pprotein保存先はasia2 `/var/lib/pprotein/data/`。
 
 ## 追加と確認
 
-適用SQL: `webapp/sql/004-non-image-indexes.sql`。
-`CONCURRENTLY`、lock_timeout 3秒、statement_timeout 2分で適用。4本ともindisvalid/indisready=true。
+索引定義は `webapp/sql/001-schema.sql` の各対象テーブル直後に記載。
+実DBには`CONCURRENTLY`、lock_timeout 3秒、statement_timeout 2分で適用済み。4本ともindisvalid/indisready=true。
 
 | 索引 | 容量 | 推定計画の確認 |
 |---|---:|---|
@@ -36,20 +36,12 @@ pprotein保存先はasia2 `/var/lib/pprotein/data/`。
 ユーザー一覧の先頭ページは全件取得する実装のためSeq Scan+Sortのまま。索引だけではアプリ側絞り込みを解消しない。
 ブロック表は推定走査cost 8.81と小さいため索引追加を見送った。通知索引は既存の調査 #18 に従い見送った。
 
-## 再適用・撤去と未実行項目
+## スキーマへの反映と未実行項目
 
 DB初期化のreset.sqlはTRUNCATE/DELETE/UPDATE/INSERTで、表や索引を作り直さないため追加索引は維持される。
-新しいDBを構築するときは004を単独で適用する。通常のデプロイやinit.shが004を自動適用する構成にはしていない。
-
-```sh
-ssh asia2 'sudo -n -u postgres psql -X -v ON_ERROR_STOP=1 -d isureal' < webapp/sql/004-non-image-indexes.sql
-```
-
-戻す場合は、作成した4索引だけをCONCURRENTLYで撤去する。
-
-```sh
-ssh asia2 'sudo -n -u postgres psql -X -v ON_ERROR_STOP=1 -d isureal' < webapp/sql/rollback-non-image-indexes.sql
-```
+新しいDBを001-schema.sqlから構築するときは、各テーブルとともに索引が作成される。
+既存DBに001-schema.sql全体を再実行しない。asia2には適用済みで、通常デプロイやinit.shによるDDL自動適用は追加していない。
+ユーザーの指示により独立した適用SQL・rollback SQLは置かず、撤去が必要になった時点で対応する。
 
 実際の初期化・再起動・デプロイ・ベンチは未実施。初期化の索引再投入費用、更新時のWAL/書込増、前後スコアを次の調整済みベンチで確認する。
 残る大きな候補は投稿枠の排他ロックとusers全体ロック（#15）。索引追加だけではロックの保持時間や地域内投稿の直列化は解消しない。
