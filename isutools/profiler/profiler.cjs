@@ -10,9 +10,13 @@ const LAUNCHER = /(?:^|[\\/])(?:(?:npm|npx)(?:-cli)?|pnpm|yarn)(?:\.c?js)?$|[\\/
 
 try {
   if (LAUNCHER.test(process.argv[1] || '')) throw Object.assign(new Error('launcher'), { skip: true });
+  const cluster = require('node:cluster');
+  const profileWorkers = process.env.ISUTOOLS_PROFILER_CLUSTER === '1';
+  if (profileWorkers && cluster.isPrimary) throw Object.assign(new Error('cluster primary'), { skip: true });
   const http = require('node:http');
   const pprof = require('@datadog/pprof');
-  const port = Number(process.env.ISUTOOLS_PROFILER_PORT || 6060);
+  const port = Number(process.env.ISUTOOLS_PROFILER_PORT || 6060) +
+    (profileWorkers && cluster.isWorker ? cluster.worker.id - 1 : 0);
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -24,7 +28,7 @@ try {
     try {
       const profile = await pprof.time.profile({ durationMillis: seconds * 1000 });
       const buf = await pprof.encode(profile);
-      res.writeHead(200, { 'Content-Type': 'application/octet-stream' }).end(buf);
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'X-Isutools-Profiler-Pid': String(process.pid) }).end(buf);
     } catch (e) {
       res.writeHead(500).end(String(e));
     }

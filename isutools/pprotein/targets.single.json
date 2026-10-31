@@ -16,5 +16,11 @@
     "Label": "asia1-pprof",
     "URL": "http://192.168.1.10:6060/debug/pprof/profile",
     "Duration": 60
+  },
+  {
+    "Type": "pprof",
+    "Label": "asia1-pprof-worker2",
+    "URL": "http://192.168.1.10:6061/debug/pprof/profile",
+    "Duration": 60
   }
 ]

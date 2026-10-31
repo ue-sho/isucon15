@@ -35,6 +35,43 @@ async function waitListening(port) {
 
 const alive = (child) => child.exitCode === null && child.signalCode === null;
 
+test('cluster mode profiles both workers instead of primary', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'isutools-cluster-'));
+  const script = path.join(dir, 'app.cjs');
+  fs.writeFileSync(script, `
+    const cluster = require('node:cluster');
+    if (cluster.isPrimary) {
+      cluster.fork(); cluster.fork();
+      process.on('SIGTERM', () => {
+        for (const worker of Object.values(cluster.workers)) worker.kill();
+        process.exit(0);
+      });
+    } else { setInterval(() => {}, 1000); }
+  `);
+  const port = nextPort;
+  nextPort += 2;
+  const app = spawn(process.execPath, ['--require', PROFILER, script], {
+    env: { ...process.env, ISUTOOLS_PROFILER_PORT: String(port), ISUTOOLS_PROFILER_CLUSTER: '1' },
+    stdio: 'ignore',
+  });
+  t.after(() => { app.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
+  await Promise.all([waitListening(port), waitListening(port + 1)]);
+  const responses = await Promise.all([port, port + 1].map((p) =>
+    fetch(`http://127.0.0.1:${p}/debug/pprof/profile?seconds=1`)));
+  const pids = [];
+  for (const response of responses) {
+    assert.strictEqual(response.status, 200);
+    const pid = Number(response.headers.get('X-Isutools-Profiler-Pid'));
+    assert.ok(pid > 0);
+    assert.notStrictEqual(pid, app.pid);
+    pids.push(pid);
+    const body = Buffer.from(await response.arrayBuffer());
+    assert.strictEqual(body[0], 0x1f);
+    assert.strictEqual(body[1], 0x8b);
+  }
+  assert.notStrictEqual(pids[0], pids[1]);
+});
+
 test('profiles the application running inside ts-node', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'isutools-ts-node-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
