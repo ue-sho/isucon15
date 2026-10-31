@@ -69,8 +69,14 @@ export function registerHandler(h: HandlerContext): Handler<Env> {
     }
     const secretKey = randomUUID();
     const userID = randomUUID();
-    const row = await h.db.get<Row>(
-      `INSERT INTO users (id, username, secret_key_hash, display_name, region) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (username) DO NOTHING RETURNING ${userColumns.join(", ")}`,
+    await using tx = await h.db.begin();
+    // 別SQLにして、ロック待機後の新しいスナップショットで重複を確認する。
+    await tx.exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, input.username);
+    const row = await tx.get<Row>(
+      `INSERT INTO users (id, username, secret_key_hash, display_name, region)
+       SELECT $1::varchar(36), $2::varchar(64), $3::text, $4::text, $5::text
+       WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = $2::varchar(64))
+       RETURNING ${userColumns.join(", ")}`,
       userID,
       input.username,
       sha256Hex(secretKey),
@@ -82,6 +88,7 @@ export function registerHandler(h: HandlerContext): Handler<Env> {
     }
     const user = userFromRow(row);
     setImageKey(user);
+    await tx.commit();
     return jsonResponse(c, 201, { secretKey, user: newSessionUserResponse(user) });
   };
 }

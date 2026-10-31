@@ -91,7 +91,7 @@ test("認証・権限・RETURNING / 新規ローカルPostgreSQL", { skip: !port
       sqls.length = 0;
       const response = await request("/register", "", "POST", { username: name, displayName: name, region: "asia" });
       assert.equal(response.status, 201, await response.clone().text());
-      assert.equal(sqls.length, 1);
+      assert.equal(sqls.length, 2);
       const body = await response.json();
       secrets.set(name, body.secretKey);
       sqls.length = 0;
