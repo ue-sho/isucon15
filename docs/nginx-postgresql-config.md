@@ -1,5 +1,41 @@
 # nginx・PostgreSQL設定と得点低下への対応
 
+## 終了前の追加変更：WAL容量（反映済み・ベンチ未検証）
+
+2026-10-31 17:35 JST、ブランチ `perf/pg-checkpoint-headroom`、起点 `053af6e`。
+asia2の読み取りでshared_buffers=512MB、effective_cache_size=2GB、work_mem=4MB、
+max_connections=100、max_wal_size=1GB、checkpoint_timeout=300秒、
+checkpoint_completion_target=0.9、永続化3設定on、SQL計測停止を確認した。
+asia1のnginxはkeepalive・gzip・sendfile・アクセスログ停止が有効だった。
+
+DB累積統計は定期checkpoint55回・要求checkpoint102回、統計起点は10/30 11:59 UTC。
+要求分には初期化や明示実行も含み、WAL容量超過だけとは断定できない。
+08:35:31.701→08:35:45.491 UTCのWAL増分は37,789,847 bytes（約2.6MiB/秒）。
+同区間のcheckpoint件数は不変。ディスク空き30GB、MemAvailable約2.1GB。
+一時ファイルは累積386件/約1.35GBで、今回ベンチの発生量とは区別する。
+
+比較候補は `max_wal_size='2GB'` のみ。WAL量によるcheckpointを減らす仮説で、
+スコア向上は未確認。WAL保持量と障害復旧時間が増える可能性があり、2GBは厳密な上限ではない。
+[PostgreSQL 16公式説明](https://www.postgresql.org/docs/16/wal-configuration.html)を参照。
+work_memやplanner、保存の同期設定を同時変更しない。
+
+本番反映はueshoとベンチ終了・対象asia2・実施順序を確認してから行う。
+反映する場合は既存設定を保存してこの設定ファイルのみを配置し、
+`pg_file_settings`で構文エラーがないことを確認後、`pg_reload_conf()`を実行する。
+`SHOW max_wal_size`が2GB、pending_restart=false、永続化3設定onを確認する。
+通常のtask deployは再起動・ログ操作を伴うため、この比較には使わない。
+比較前後のベンチID・SHA・スコア・成否・checkpoint/WAL統計の差分を記録する。
+改善しなければ元ファイルを復元しreload、`SHOW max_wal_size`が1GBに戻ることを確認する。
+ユーザーの「良さそうと思うものをやって」の許可で17:37 JSTにasia2へ反映した。
+直前はdeploy.lockなし、DB接続はguardのidleと調査psqlのみ。
+実機checkoutは `bd247ba` で、ローカル起点とは異なる。対象設定は変更前に一致を確認した。
+元ファイルは `/etc/postgresql/16/main/conf.d/zzz-isureal-performance.conf.before-checkpoint-20261031`
+へ保存。対象ファイルのみ配置し、pg_file_settingsのエラー0件を確認してreload成功。
+別接続でmax_wal_size=2048MB、shared_buffers=512MB、永続化3設定on、
+pending_restart=false、PostgreSQL active、リポジトリとのファイル一致を確認した。
+反映直後のcheckpoint基準は定期55/要求102（08:37:27 UTC）。
+ベンチ・push・マージは未実施。戻す場合は上記バックアップを元のパスにコピーしてreloadする。
+
 2026-10-31。[Issue #34](https://github.com/ue-sho/isucon15/issues/34)。
 参照は [private-isu-2026 PR #9](https://github.com/ue-sho/private-isu-2026/pull/9)。MySQL設定の移植ではなく、PostgreSQL 16と今回の3.7GiB/2vCPU構成へ合わせた。
 ブランチは `perf/nginx-postgresql-config`、起点は稼働版 `cfa6cb8`。
