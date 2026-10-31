@@ -15,7 +15,7 @@ import { canView, getPostPermissions, loadViewerContext, type Post } from "../sr
 import { createPostHandler, getPostHandler, updatePostHandler } from "../src/post_api.ts";
 import { replaceRealMojiHandler, getRealMojisHandler } from "../src/realmoji_api.ts";
 import type { Env, HandlerContext } from "../src/server.ts";
-import { createLoginSession, sessionMiddleware } from "../src/session.ts";
+import { createLoginSession, sessionMiddleware, sha256Hex } from "../src/session.ts";
 import { getMeHandler, loginHandler, logoutHandler, registerHandler, updateMeHandler } from "../src/user_api.ts";
 
 const port = process.env.AUTH_PERMISSION_TEST_PG_PORT;
@@ -96,7 +96,7 @@ test("認証・権限・RETURNING / 新規ローカルPostgreSQL", { skip: !port
       secrets.set(name, body.secretKey);
       sqls.length = 0;
       await login(name);
-      assert.equal(sqls.length, 2);
+      assert.equal(sqls.length, 3);
       assert.equal(sqls.filter((sql) => sql.includes("FOR NO KEY UPDATE")).length, 1);
     }
     const registrations = await Promise.all(Array.from({ length: 8 }, () =>
@@ -132,6 +132,24 @@ test("認証・権限・RETURNING / 新規ローカルPostgreSQL", { skip: !port
     const session = await createLoginSession(db, id);
     assert.equal(sqls.filter((sql) => sql.includes("FOR NO KEY UPDATE")).length, 1);
     assert.equal((await request("/me", session.token)).status, 200);
+  });
+
+  await t.test("存在しない名前・不正な鍵・退会ユーザーは1 SELECTだけで401になり、現セッションを維持する", async () => {
+    await control.query(`INSERT INTO users(id, username, secret_key_hash, display_name, region, status)
+      VALUES ('precheck-deleted', 'precheck_deleted', $1, 'Deleted', 'asia', 'deleted')`, [sha256Hex("deleted-secret")]);
+    for (const credentials of [
+      { username: "no_such_user", secretKey: "invalid" },
+      { username: "viewer", secretKey: "invalid" },
+      { username: "precheck_deleted", secretKey: "deleted-secret" },
+    ]) {
+      sqls.length = 0;
+      const response = await request("/login", "", "POST", credentials);
+      assert.equal(response.status, 401);
+      assert.deepEqual(await response.json(), { error: "invalid_credentials" });
+      assert.equal(sqls.length, 1);
+      assert.doesNotMatch(sqls[0], /FOR .*UPDATE/);
+    }
+    assert.equal((await request("/me", tokens.get("viewer")!)).status, 200);
   });
 
   await t.test("不正な秘密鍵はユーザー行ロックを待たず、正常ログインは退会commit後に再判定する", async () => {

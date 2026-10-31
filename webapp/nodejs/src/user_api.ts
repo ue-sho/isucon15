@@ -102,13 +102,24 @@ export function loginHandler(h: HandlerContext): Handler<Env> {
     if (!usernamePattern.test(input.username)) {
       throw new APIError(401, "invalid_credentials");
     }
+    const secretKeyHash = sha256Hex(input.secretKey);
+    // Reject bad credentials without holding a pool connection across BEGIN/ROLLBACK.
+    // This is only a precheck: successful candidates are checked again under the user lock.
+    const candidate = await h.db.get<{ id: string }>(
+      `SELECT id FROM users WHERE username = $1 AND secret_key_hash = $2 AND status = 'active'`,
+      input.username,
+      secretKeyHash,
+    );
+    if (!candidate) {
+      throw new APIError(401, "invalid_credentials");
+    }
     await using tx = await h.db.begin();
     const row = await tx.get(
       // 認証失敗の行はロックしない。成功時のロックはセッション置換と退会の排他に必要。
       `SELECT id, username, secret_key_hash, display_name, bio, profile_image_id, region, account_type, status FROM users
        WHERE username = $1 AND secret_key_hash = $2 AND status = 'active' FOR NO KEY UPDATE`,
       input.username,
-      sha256Hex(input.secretKey),
+      secretKeyHash,
     );
     if (!row) {
       throw new APIError(401, "invalid_credentials");
