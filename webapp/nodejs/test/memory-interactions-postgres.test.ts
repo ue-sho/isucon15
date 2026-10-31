@@ -166,10 +166,11 @@ test("Memories interactions: real PostgreSQL equivalence, row counts and plans",
   const schema = `memories_test_${process.pid}`;
   let createdSchema = false;
   const report: Row = {
-    node: process.version, base: process.env.MEMORIES_BASE_SHA ?? "ef058e726628cb17b7ffa68eb1868334f1e1aad6", productionDistribution: "unverified",
+    node: process.version, base: process.env.MEMORIES_BASE_SHA ?? "fa082c17ae958fd1a3ff24fa24604a5b1c74b2bc", productionDistribution: "unverified",
     sqlSamples: 8, sqlWarmups: 2, explainSamples: 6, explainWarmups: 1, explainTiming: false,
     apiSamples: process.env.MEMORIES_PG_BENCHMARK ? 4 : 1,
     apiTiming: "in-process Hono request through authentication, region check, handler and response body; no HTTP network",
+    apiCache: "advance fixture signature generation, warm the same variant once before each timed sample; reset and warm-up excluded",
     scenarios: {},
   };
   try {
@@ -280,11 +281,14 @@ test("Memories interactions: real PostgreSQL equivalence, row counts and plans",
       stats.oldAPIMs = [old.ms];
       stats.newAPIMs = [current.ms];
       if (process.env.MEMORIES_PG_BENCHMARK) {
-        // The first requests above warm the code/data and are excluded here.
+        // Isolate the old/new signature LRU state: different SQL row orders
+        // must not give one variant warm entries left by the other variant.
         stats.oldAPIMs = [];
         stats.newAPIMs = [];
         for (let round = 0; round < 4; round++) {
           for (const legacy of round % 2 === 0 ? [true,false] : [false,true]) {
+            await db.exec("UPDATE image_signature_cache_state SET generation=generation+1 WHERE singleton");
+            await request(group.name, url, legacy);
             const result = await request(group.name, url, legacy);
             assert.equal(result.text, old.text);
             stats[legacy ? "oldAPIMs" : "newAPIMs"].push(result.ms);

@@ -1,6 +1,6 @@
 # Memoriesの投稿別リアクション取得制限
 
-2026-10-31（JST）。基準コミットは `1ecea18`、作業ブランチは `perf/memories-interaction-limit`。本メモと同じコミットの `webapp/nodejs/src/memory_api.ts` を対象とする。検証版のSHA-256は `59f3798cf25b16188e3dcbfdf9f79613e689d18735f031539958466c03d52d7d`。
+2026-10-31（JST）。作業ブランチは `perf/memories-interaction-limit`。以下の初回計測は基準 `1ecea18` に対する実装コミット `e4450eb` の結果。初回 `memory_api.ts` のSHA-256は `59f3798cf25b16188e3dcbfdf9f79613e689d18735f031539958466c03d52d7d`。main取り込み後の条件・結果は末尾の追補と区別する。
 
 ## 判断と変更
 
@@ -14,7 +14,7 @@
 
 **本番の反応件数分布は未確認。** 今回は専用worktreeとローカルDBだけで検証した。共有環境の負荷・他担当の計測状況を調整していないため、共有DBでの集計、DDL、デプロイ、再起動、公式ベンチは実施していない。本番採否とスコア効果は保留。実データで大半が投稿別50件以下なら、この変更を見送る理由になる。
 
-## 比較条件
+## 初回の比較条件
 
 - PostgreSQL 16.13、Docker `postgres:16`、aarch64。専用コンテナのloopbackポートのみ使用。
 - Node.js 26.12.1。リポジトリの `001-schema.sql` を新規のテスト専用schemaに適用し、追加インデックスなしでANALYZE。
@@ -79,7 +79,7 @@ APIの最小〜最大（各4回）:
 - 境界ケースのRealMoji DB内時間は3.32→4.18msへ増えた（交互6回でも確認）。走査量・sort入力は同じで、順位計算とsort key追加の費用を含む。取得・解析を含むSQL時間とAPI時間は減ったが、「DB内負荷が一切増えない」とは結論しない。
 - `plan_cache_mode=auto` で旧はcustom plan、新はgeneric planを使った。実際のprepared statementをEXPLAINし、任意のplan設定を強制していない。本番の統計・件数・prepared statementの実行履歴で計画が変わり得る。
 
-## LATERAL案との比較
+## 初回基準版でのLATERAL案との比較
 
 既存helperのSQL全体を `unnest(postIDs) CROSS JOIN LATERAL (...)` で包み、その内側で条件適用後に投稿別LIMIT 50を取る案も実PostgreSQLで試した。応答全文・取得件数は一致した。
 
@@ -102,7 +102,7 @@ APIの最小〜最大（各4回）:
 
 ## 再現方法
 
-対象worktreeは `/Users/yk/Documents/private/isu-con/isucon15-memories-interaction-limit`。次はローカルの空DBを新しく起動する手順であり、共有DBへ向けない。
+対象worktreeは `/Users/yk/Documents/private/isu-con/isucon15-memories-interaction-limit`。次は現行ブランチでローカルの空DBを新しく起動する手順であり、共有DBへ向けない。初回の数値を再現する場合は `e4450eb` の版が必要。
 
 ```sh
 cd /Users/yk/Documents/private/isu-con/isucon15-memories-interaction-limit/webapp/nodejs
@@ -129,3 +129,28 @@ docker stop isucon15-memories-recheck
 - [PostgreSQL 16: Window Functions](https://www.postgresql.org/docs/16/tutorial-window.html): WHEREで除外された行はwindow関数の対象外。投稿ごとの順位と外側での絞り込みに利用。
 - [PostgreSQL 16: LATERAL](https://www.postgresql.org/docs/16/queries-table-expressions.html#QUERIES-LATERAL): 比較した投稿別LIMIT案。
 - [PostgreSQL 16: Using EXPLAIN](https://www.postgresql.org/docs/16/using-explain.html)、[PREPARE](https://www.postgresql.org/docs/16/sql-prepare.html): DB内実行時間と転送時間の区別、実際のprepared statementの計画確認。
+
+## main取り込み後の再検証（2026-10-31）
+
+画像署名キャッシュ・初期化世代管理・51投稿目の署名省略を含むmain `fa082c17ae958fd1a3ff24fa24604a5b1c74b2bc` を取り込み、同じ合成データで再検証した。さらに `2c9e2fd786f4898e484fc29077f3d920ca2cb4d2` のfriendsフィード変更も取り込む。この追加差分はMemories・署名・DBスキーマ・運用ツールを変更していない。以下の計測はfa082c1版の共通処理を使った旧反応SQLと新反応SQLの比較であり、上の初回数値と混ぜない。
+
+既存テストの簡易DBはselect/getだけを実装していたため、ラッパー生成時のexec.bindをやめ、get/execを呼ばれた時だけ元DBへ委譲するようにした。共有helperとpage-response.test.tsへの独自変更はない。mainから取り込んだ既存変更は維持した。
+
+API時間は各サンプルの直前にテスト専用DBの署名世代を進め、同じ実装で1回warm-upしてから計測する。リセットとwarm-upは計測区間外。旧・新が異なるSQL行順で、相手のLRU状態を引き継ぐ影響を避けるためである。各4回・順序交互、SQLは各8回、EXPLAINは各6回。スキーマ・索引も取り込み後の001-schema.sqlを使用し、独自のDDLは追加していない。
+
+| 条件 | DB取得（各種類、旧→新） | RealMoji SQL ms | コメントSQL ms | API ms |
+|---|---:|---:|---:|---:|
+| 境界値・偏り | 5,285 → 334 | 12.49 → 4.82 | 22.47 → 5.54 | 49.35 → 22.57 |
+| 少量 | 500 → 500 | 3.19 → 2.48 | 2.58 → 2.79 | 16.58 → 20.32 |
+| 大量 | 50,000 → 2,500 | 116.16 → 40.14 | 174.88 → 37.99 | 2863.85 → 2573.44 |
+| 削除等混在 | 5,000 → 2,500 | 16.16 → 11.42 | 26.95 → 13.98 | 2552.55 → 2528.02 |
+
+少量では取得件数が減らず、コメントSQLは2.58→2.79ms（+0.22ms）、APIは16.58→20.32ms（+3.75ms、約22.6%）となった。絶対時間は小さいが改善とは扱わない。APIの範囲は旧11.68〜17.33ms、新17.18〜22.87ms。大量のAPIは2,863.85→2,573.44ms（約10.1%短縮）だが、本番分布と実ネットワークでの効果は未確認。
+
+境界RealMojiのDB内時間は3.47→4.39msと今回も微増。大量ではRealMoji 50.24→37.95ms、コメント43.31→33.74ms。取得削減とDB内走査削減を混同せず、本番で有効反応50件以下の投稿が中心なら見送りを検討する。
+
+fa082c1取り込み後: npm run check成功。page-response・image-signature-cache・image-signature-generationの関連テストは47成功・0失敗・1 opt-in skip。Memories専用の実PostgreSQLテストは1成功・0失敗・0skip（約111秒）。途中のef058e7では既存の署名回数テストがmain単体でも21件失敗したが、その後取り込んだmainで解消済み。複数プロセスを起動する署名世代のopt-in試験は今回未実行。
+
+最新結果はGit対象外の `.isutools/memories-interaction-limit/latest-main-comparison.json`。初回データ・計画は `comparison.json` に残した。main統合後も本番分布、共有環境でのDDL・デプロイ・再起動・公式ベンチは未確認・未実施。
+
+本PR固有のDDLはない。ただし取り込んだmainの前提として、image_signature_cache_stateテーブルとinitial_data_boundary.image_cache_generation列が必要。既存の適用記録は他変更のdocsを参照し、反映前に存在を読み取り確認する。適用済みmigrationを無条件に再実行しない。

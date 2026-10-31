@@ -5,7 +5,7 @@ import { test, type TestContext } from "node:test";
 import { Hono } from "hono";
 import { apiErrorHandler } from "../src/api_error.ts";
 import { getImageHandler } from "../src/image_api.ts";
-import { imageSignature, imageSigningKey, signedImageURL } from "../src/image_signature.ts";
+import { imageSignature, imageSigningKey, signedImageURL, withImageSignatureCacheGeneration } from "../src/image_signature.ts";
 import type { Env, HandlerContext } from "../src/server.ts";
 import type { User } from "../src/user.ts";
 import { referenceImageSignature } from "./image-signature-cache-reference.ts";
@@ -19,7 +19,8 @@ const realCreateHmac = crypto.createHmac;
 async function freshSignature() {
   const module: typeof import("../src/image_signature.ts") =
     await import("../src/image_signature.ts?cache-test=" + moduleID++);
-  return module.imageSignature;
+  return (...args: Parameters<typeof module.imageSignature>) =>
+    module.withImageSignatureCacheGeneration("1", () => module.imageSignature(...args));
 }
 
 function clock(t: TestContext) {
@@ -225,7 +226,7 @@ test("actual image handler still checks signature, expiry, owner and validity on
       async get(sql: string) {
         if (sql.includes("SELECT u.secret_key_hash")) {
           ownerReads++;
-          return active ? { secret_key_hash: ownerKey.toString("hex") } : undefined;
+          return active ? { secret_key_hash: ownerKey.toString("hex"), signature_cache_generation: "1" } : undefined;
         }
         validityReads++;
         if (expireDuringRead) time.wall = exp * 1000;
@@ -236,7 +237,7 @@ test("actual image handler still checks signature, expiry, owner and validity on
   const app = new Hono<Env>();
   app.onError(apiErrorHandler);
   app.get("/api/images/:imageId", getImageHandler(h));
-  const signature = imageSignature(key, "handler-image", exp).toString("base64url");
+  const signature = withImageSignatureCacheGeneration("1", () => imageSignature(key, "handler-image", exp)).toString("base64url");
   const url = "/api/images/handler-image?exp=" + exp + "&sig=" + signature;
   assert.equal((await app.request(url)).status, 200);
   assert.equal((await app.request(url)).status, 200);
@@ -266,4 +267,55 @@ test("actual image handler still checks signature, expiry, owner and validity on
   expireDuringRead = true;
   assert.equal((await app.request(url)).status, 403);
   assert.equal((await app.request(url)).status, 403);
+});
+
+test("generation changes discard cached signatures; missing or stale generations bypass reuse", async (t) => {
+  clock(t);
+  const m: typeof import("../src/image_signature.ts") = await import("../src/image_signature.ts?generation=" + moduleID++);
+  const calls = countHmac(t);
+  const sign = () => m.imageSignature(key, "generation", exp);
+  const run = (generation: unknown) => m.withImageSignatureCacheGeneration(generation, sign);
+  const expected = run("9007199254740992");
+  assert.deepEqual(run("9007199254740992"), expected);
+  assert.equal(calls(), 1000);
+  assert.deepEqual(run("9007199254740993"), expected);
+  assert.equal(calls(), 2000, "bigint generations must not collapse through Number");
+  for (const generation of ["9007199254740992", undefined, null, 2, "bad", "0"]) {
+    assert.deepEqual(run(generation), expected);
+    assert.deepEqual(run(generation), expected);
+  }
+  assert.equal(calls(), 14000);
+  assert.deepEqual(run("9007199254740993"), expected);
+  assert.equal(calls(), 14000, "old/missing scope must not replace the current cache");
+  sign(); sign();
+  assert.equal(calls(), 16000, "scope must not leak to a later unscoped caller");
+});
+
+test("a delayed old request cannot reintroduce entries after another request observes reset", async (t) => {
+  clock(t);
+  const m: typeof import("../src/image_signature.ts") = await import("../src/image_signature.ts?generation=" + moduleID++);
+  const calls = countHmac(t);
+  let release!: () => void;
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  const sign = () => m.imageSignature(key, "overlap", exp);
+  const oldRequest = m.withImageSignatureCacheGeneration("1", async () => {
+    sign();
+    await wait;
+    sign(); sign();
+  });
+  assert.equal(calls(), 1000);
+  await m.withImageSignatureCacheGeneration("2", async () => {
+    sign();
+    await Promise.resolve();
+    sign();
+  });
+  assert.equal(calls(), 2000);
+  release();
+  await oldRequest;
+  assert.equal(calls(), 4000, "old async continuation must neither read nor fill the new cache");
+  m.withImageSignatureCacheGeneration("2", sign);
+  assert.equal(calls(), 4000);
+  await assert.rejects(m.withImageSignatureCacheGeneration("3", async () => { throw new Error("request failed"); }));
+  sign(); sign();
+  assert.equal(calls(), 6000, "failed request must not leak its generation scope");
 });
