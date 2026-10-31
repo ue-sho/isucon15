@@ -182,7 +182,6 @@ CREATE TABLE posts (
 );
 CREATE INDEX posts_author_id ON posts(author_id);
 CREATE INDEX posts_posting_window_id ON posts(posting_window_id);
-CREATE INDEX posts_active_author_window_idx ON posts(author_id,posting_window_id) WHERE deleted_at IS NULL;
 CREATE INDEX posts_active_image_author_idx ON posts(image_id,author_id) WHERE deleted_at IS NULL;
 CREATE INDEX posts_author_window_counts_idx ON posts(author_id,posting_window_id) INCLUDE(deleted_at);
 
