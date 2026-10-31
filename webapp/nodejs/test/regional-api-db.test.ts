@@ -18,6 +18,7 @@ test("地域別アプリの投稿と共有DBの即時反映", { skip: !port }, a
   t.after(() => admin.end());
   assert.equal((await admin.query("SELECT count(*) FROM pg_tables WHERE schemaname='public'")).rows[0].count, "0", "requires a new disposable DB");
   await admin.query(await readFile(new URL("../../sql/001-schema.sql", import.meta.url), "utf8"));
+  await admin.query(await readFile(new URL("../../sql/migrations/20261031-post-db-call.up.sql", import.meta.url), "utf8"));
   for (const region of ["asia", "europe", "america"]) {
     await admin.query("INSERT INTO users(id,username,secret_key_hash,display_name,region) VALUES ($1::text,$1::text,$2::text,$1::text,$3::text),($4::text,$4::text,$2::text,$4::text,$3::text)", [region, "ab".repeat(32), region, region + "-friend"]);
     await admin.query("INSERT INTO login_sessions(id,user_id,token_hash) VALUES($1::text,$1::text,$2::text),($3::text,$3::text,$4::text)", [region, sha256Hex(region), region + "-friend", sha256Hex(region + "-friend")]);
