@@ -18,7 +18,7 @@ export function exportPostsHandler(h: HandlerContext): Handler<Env> {
     const author = must(await getUser(h.db, userID));
     const posts = await h.db.select(
       `
-   SELECT ${postColumns}, i.data AS image_data
+   SELECT ${postColumns}, encode(i.data, 'base64') AS image_data_base64
    FROM posts p
    JOIN posting_windows w ON w.id = p.posting_window_id
    JOIN image_objects i ON i.id = p.image_id
@@ -32,7 +32,8 @@ export function exportPostsHandler(h: HandlerContext): Handler<Env> {
     const items: ExportPostResponse[] = [];
     for (const row of posts) {
       const imagePath = `images/${String(items.length + 1).padStart(6, "0")}.jpg`;
-      zip.file(imagePath, row.image_data, { compression: "STORE", createFolders: false });
+      // pg's text bytea format is hex (2x the image size); base64 reduces DB traffic.
+      zip.file(imagePath, Buffer.from(row.image_data_base64, "base64"), { compression: "STORE", createFolders: false });
       items.push({ ...newPostResponse(postFromRow(row), author), imagePath });
     }
     zip.file("posts.json", encodeJSON(items), { compression: "DEFLATE" });
