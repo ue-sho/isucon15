@@ -21,7 +21,7 @@ export async function exportImageFiles(db: DB, files: ImageFiles) {
       ${imageFileGenerationSQL} AS image_file_generation
     FROM image_objects i CROSS JOIN initial_data_boundary b`);
   for (;;) {
-    const rows = await tx.select<Image>("FETCH FORWARD 64 FROM image_export");
+    const rows = await tx.select<Image>("FETCH FORWARD 512 FROM image_export");
     if (!rows.length) break;
     for (let start = 0; start < rows.length; start += 8) {
     const writes = await Promise.allSettled(rows.slice(start, start + 8).map(async (row) => {

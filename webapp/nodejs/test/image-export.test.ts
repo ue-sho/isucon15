@@ -16,18 +16,18 @@ test("全画像の一括書き出し・再実行・世代変更・失敗後の�
   await db.exec("CREATE TABLE initial_data_boundary (image_cache_generation text, created_at timestamptz)");
   await db.exec("INSERT INTO initial_data_boundary VALUES (gen_random_uuid()::text, now() + interval '1 day')");
   await db.exec("CREATE TABLE image_objects (id text, owner_user_id text, created_at timestamptz, media_type text, data bytea)");
-  await db.exec(`INSERT INTO image_objects SELECT n::text, 'owner', now(), CASE WHEN n=129 THEN 'image/gif' WHEN n%2=0 THEN 'image/png' ELSE 'image/jpeg' END, decode('010203','hex') FROM generate_series(1,129) n`);
+  await db.exec(`INSERT INTO image_objects SELECT n::text, 'owner', now(), CASE WHEN n=1025 THEN 'image/gif' WHEN n%2=0 THEN 'image/png' ELSE 'image/jpeg' END, decode('010203','hex') FROM generate_series(1,1025) n`);
   const root = await mkdtemp(join(tmpdir(), "image-export-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const files = new ImageFiles(join(root, "images"), 0);
-  assert.deepEqual(await exportImageFiles(db, files), { written: 128, existing: 0, unsupported: 1, bytes: 384 });
-  assert.deepEqual(await exportImageFiles(db, files), { written: 0, existing: 128, unsupported: 1, bytes: 0 });
+  assert.deepEqual(await exportImageFiles(db, files), { written: 1024, existing: 0, unsupported: 1, bytes: 3072 });
+  assert.deepEqual(await exportImageFiles(db, files), { written: 0, existing: 1024, unsupported: 1, bytes: 0 });
   const row = await db.get<any>(`SELECT i.*, i.xmin::text AS version, ${imageFileGenerationSQL} AS generation FROM image_objects i CROSS JOIN initial_data_boundary b WHERE i.id='1'`);
   assert.deepEqual(await readFile(files.reference(row.generation, row.id, row.owner_user_id, row.created_at, row.version, row.media_type)!.path), Buffer.from([1,2,3]));
   await db.exec("UPDATE initial_data_boundary SET image_cache_generation=gen_random_uuid()::text");
-  assert.equal((await exportImageFiles(db, files)).existing, 128);
+  assert.equal((await exportImageFiles(db, files)).existing, 1024);
   await assert.rejects(exportImageFiles(db, new ImageFiles(join(root, "full"), Number.MAX_SAFE_INTEGER)), /disk space/);
-  assert.equal((await exportImageFiles(db, files)).existing, 128);
+  assert.equal((await exportImageFiles(db, files)).existing, 1024);
   class ResetDuringWrite extends ImageFiles {
     reset = false;
     override async put(file: Parameters<ImageFiles["put"]>[0], data: Parameters<ImageFiles["put"]>[1]) {
