@@ -104,16 +104,16 @@ export function loginHandler(h: HandlerContext): Handler<Env> {
     }
     await using tx = await h.db.begin();
     const row = await tx.get(
-      `SELECT id, username, secret_key_hash, display_name, bio, profile_image_id, region, account_type, status FROM users WHERE username = $1 FOR NO KEY UPDATE`,
+      // 認証失敗の行はロックしない。成功時のロックはセッション置換と退会の排他に必要。
+      `SELECT id, username, secret_key_hash, display_name, bio, profile_image_id, region, account_type, status FROM users
+       WHERE username = $1 AND secret_key_hash = $2 AND status = 'active' FOR NO KEY UPDATE`,
       input.username,
+      sha256Hex(input.secretKey),
     );
     if (!row) {
       throw new APIError(401, "invalid_credentials");
     }
     const user = userFromRow(row);
-    if (user.status !== "active" || user.secretKeyHash !== sha256Hex(input.secretKey)) {
-      throw new APIError(401, "invalid_credentials");
-    }
     const session = await createLoginSessionForLockedUserTx(tx, user.id);
     await tx.commit();
     return jsonResponse(c, 200, { token: session.token, user: newSessionUserResponse(user) });
