@@ -41,7 +41,9 @@ function setup(kind: Kind, count: number, filtered = false) {
     },
     select: async (sql: string, ...args: unknown[]) => {
       queries.push({ sql, args });
-      if (sql.includes("FROM block_relations")) return [];
+      // 投稿候補SQL内のNOT EXISTSもblock_relationsを参照する。
+      // 関係だけを取得するSQLと区別し、投稿候補を空配列に置き換えない。
+      if (sql.includes("FROM block_relations") && !sql.includes("FROM posts p")) return [];
       if (sql.includes("FROM friendships") && !sql.includes("FROM (")) {
         if (kind !== "ranked") return [];
         return [{ user_low_id: "friend", user_high_id: args[0] === "viewer" ? "viewer" : "author" }];

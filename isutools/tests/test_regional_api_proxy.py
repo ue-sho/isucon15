@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -20,6 +21,12 @@ import urllib.request
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
+BACKEND_HOST = 'host.docker.internal' if sys.platform == 'darwin' else '127.0.0.1'
+
+
+def docker_network(port):
+    # Docker Desktopのhost network機能を有効にする操作を試験の前提にしない。
+    return ['-p', f'127.0.0.1:{port}:{port}'] if sys.platform == 'darwin' else ['--network', 'host']
 
 
 def free_port():
@@ -63,7 +70,7 @@ def backend(label):
         def log_message(self, *args):
             pass
 
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server = http.server.ThreadingHTTPServer(('0.0.0.0' if sys.platform == 'darwin' else '127.0.0.1', 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -87,8 +94,6 @@ class RegionalAPIProxyTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr.decode())
 
     def test_real_nginx_routing_and_forwarding(self):
-        desktop = 'Docker Desktop' in subprocess.check_output(['docker', 'info', '--format', '{{.OperatingSystem}}'], text=True)
-        backend_host = 'host.docker.internal' if desktop else '127.0.0.1'
         with backend('local') as (local_port, local_calls):
             for host, port, region in [('europe1', 8081, 'europe'), ('america1', 8082, 'america')]:
                 with self.subTest(host=host), backend(region) as (remote_port, remote_calls):
@@ -97,15 +102,14 @@ class RegionalAPIProxyTest(unittest.TestCase):
                         edge_port = free_port()
                         upstream = (ROOT / host / 'etc/nginx/conf.d/isureal-regional-api.conf').read_text()
                         self.assertIn(f'192.168.1.10:{port}', upstream)
-                        upstream = upstream.replace(f'192.168.1.10:{port}', f'{backend_host}:{remote_port} max_fails=0')
+                        upstream = upstream.replace(f'192.168.1.10:{port}', f'{BACKEND_HOST}:{remote_port} max_fails=0')
                         # 試験だけ予備upstreamを追加。snippetのoffがなければ再送される条件。
-                        upstream = upstream.replace('  keepalive 16;', f'  server {backend_host}:{local_port} backup;\n  keepalive 16;')
+                        upstream = upstream.replace('  keepalive 16;', f'  server {BACKEND_HOST}:{local_port} backup;\n  keepalive 16;')
                         site = (ROOT / host / 'etc/nginx/sites-available/isureal.conf').read_text()
                         # 下の再送用テスト設定を対象外経路へ継承させない（本来の既定値）。
                         site = site.replace('location /api/ {', 'location /api/ {\n    proxy_next_upstream error timeout;')
-                        if not desktop:
-                            site = site.replace('listen 80 default_server', f'listen {edge_port} default_server')
-                        local_upstream = (ROOT / host / 'etc/nginx/conf.d/isureal-local-api.conf').read_text().replace('127.0.0.1:8080', f'{backend_host}:{local_port}')
+                        site = site.replace('listen 80 default_server', f'listen {edge_port} default_server')
+                        local_upstream = (ROOT / host / 'etc/nginx/conf.d/isureal-local-api.conf').read_text().replace('127.0.0.1:8080', f'{BACKEND_HOST}:{local_port}')
                         gzip_config = '\n'.join(line for line in (ROOT / host / 'etc/nginx/nginx.conf').read_text().splitlines() if line.strip().startswith('gzip'))
                         site = site.replace('/etc/nginx/snippets/', f'/repo/{host}/etc/nginx/snippets/')
                         (root / 'nginx.conf').write_text(f'''
@@ -128,8 +132,7 @@ http {{
 }}
 ''')
                         name = 'isu15-regional-test-' + uuid.uuid4().hex[:10]
-                        network = ['-p', f'127.0.0.1:{edge_port}:80'] if desktop else ['--network', 'host']
-                        common = ['docker', 'run', '--rm', '--user', f'{os.getuid()}:{os.getgid()}', '--entrypoint', 'nginx', *network, '-v', f'{root}:/test', '-v', f'{ROOT}:/repo:ro']
+                        common = ['docker', 'run', '--rm', '--user', f'{os.getuid()}:{os.getgid()}', '--entrypoint', 'nginx', *docker_network(edge_port), '-v', f'{root}:/test', '-v', f'{ROOT}:/repo:ro']
                         check = subprocess.run(common + ['nginx:1.24', '-e', 'stderr', '-t', '-c', '/test/nginx.conf'], capture_output=True)
                         self.assertEqual(check.returncode, 0, check.stderr.decode())
                         subprocess.run(common + ['-d', '--name', name, 'nginx:1.24', '-c', '/test/nginx.conf', '-g', 'daemon off;'], check=True, capture_output=True)

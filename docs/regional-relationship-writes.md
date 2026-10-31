@@ -88,3 +88,11 @@ asia1の通常サービスとeurope/america補助2サービスがactive、8081/8
 
 切り戻しは、この変更コミットをrevertして同じ手順でデプロイするか、追加した4つのlocationだけを両edgeから削除して `nginx -t` 後に反映する。
 DBの復元・DDLは不要。既存の地域転送snippet・補助サービス・friends feedの経路は維持する。
+
+## mainとの統合（2026-10-31）
+
+main `6caf167` のMemoriesのasia2転送、publicフィード改善と試験修正を取り込んだ。
+共通nginx試験の競合は、mainの `BACKEND_HOST` / `docker_network` を再利用し、関係更新の全9経路・再送抑止試験を残して解消した。
+Memories転送の既存試験も併せて実行する。asia2は現在Memories用アプリも動かす構成なので、反映確認時はapp=activeを期待する。
+ベンチ #23620（6260点・Passed）は統合前の `48334f8` の結果であり、Memories・publicフィードと組み合わせた統合版のベンチ結果ではない。
+統合版の共有サーバーへのデプロイ・再起動・初期化・ベンチは実施しない。
