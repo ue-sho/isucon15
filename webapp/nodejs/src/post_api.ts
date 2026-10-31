@@ -5,7 +5,7 @@ import { bind } from "./bind.ts";
 import { must } from "./db.ts";
 import { signedImageURL } from "./image_signature.ts";
 import { decodeJPEG } from "./jpeg.ts";
-import { canView, getPost, getPostWithAuthor, loadViewerContext, validLocation, type Post, type PostLocation } from "./post.ts";
+import { canView, getPost, getPostWithAuthor, loadViewerContext, selectPostsWithAuthor, validLocation, type Post, type PostLocation } from "./post.ts";
 import { getPostingWindow } from "./posting_window.ts";
 import { jsonResponse, noContent } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
@@ -187,26 +187,23 @@ export function newPostResponse(post: Post, user: User): PostResponse {
 export function getMyCurrentPostHandler(h: HandlerContext): Handler<Env> {
   return async (c) => {
     const userID = getSession(c)!.userID;
-    const row = await h.db.get<{ id: string }>(
+    const [currentPost] = await selectPostsWithAuthor(
+      h.db,
       `
-   SELECT p.id FROM posts p
-   JOIN posting_windows w ON w.id = p.posting_window_id
-   JOIN users u ON u.id = p.author_id
-   JOIN posting_windows current ON current.region = u.region AND current.ended_at IS NULL
-                              AND current.local_date = w.local_date
-   WHERE p.author_id = $1 AND p.deleted_at IS NULL
+   AND p.author_id = $1
+   AND EXISTS (
+     SELECT 1 FROM posting_windows current
+     WHERE current.region = u.region AND current.ended_at IS NULL
+       AND current.local_date = w.local_date
+   )
+   LIMIT 1
   `,
       userID,
     );
-    if (!row) {
+    if (!currentPost) {
       throw new APIError(404, "post_not_found");
     }
-    const post = await getPost(h.db, row.id);
-    if (!post) {
-      throw new APIError(404, "post_not_found");
-    }
-    const user = must(await getUser(h.db, userID));
-    return jsonResponse(c, 200, newPostResponse(post, user));
+    return jsonResponse(c, 200, newPostResponse(currentPost.post, currentPost.author));
   };
 }
 
