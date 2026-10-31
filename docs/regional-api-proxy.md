@@ -4,6 +4,26 @@
 ブランチ `perf/regional-api-proxy`、起点は最新main `f1797e6`。
 #13の署名・#15のロック・#19のフィードSQLの変更は含めない。
 
+## 本番反映の記録（2026-10-31）
+
+ユーザーのpush・本番適用の依頼により、asia1→疎通確認→europe1/america1の順で `ef49e1d3c997c3285d1472b560c534bba99b951a` を反映した。
+別担当の既存改善を巻き戻さないため、最新main `3a19a28` を統合し、投稿共有ロックと画像署名キャッシュを維持した。
+この変更自体による署名・投稿ロック方式の修正ではない。統合後の型チェック成功、Nodeテスト34件成功・専用DBテスト3件skip。
+
+- 初回はasia1からGitHubへのSSH認証で失敗し、設定配置・再起動前に停止。ユーザー許可でローカル一時SSHエージェントへ既存鍵を追加し、転送を使って再実行した。鍵本体はサーバーへ配置していない。
+- asia1の通常サービスと地域別補助2つはactive、8080/8081/8082で待受。親は永続的にenabledで `/etc/systemd/system/multi-user.target.wants/isureal-nodejs.service` が存在する。
+- 補助のUnitFileStateはstaticだが、親のWantsから起動する。両補助のPartOfも実機確認済み。3台のロックを取得し、親の再起動で3プロセスのPIDがすべて変わりactiveへ復帰することを検証した。
+- europe1→8081、america1→8082で未認証APIが401。edge切替後の両nginx経由も401。本番nginx -tは両方成功。これは疎通・認証拒否の確認であり、正常ユーザーの投稿・期間内検証成功を実測したものではない。
+- europe1/america1のNodeとnginxも永続enabled。共有DBはasia2のまま。各サーバーの既存PostgreSQL再起動もユーザー許可の範囲でtask deployが実施した。DB分散・レプリカ追加は行っていない。
+- asia2はmax_connections=100、superuser_reserved_connections=3。確認時のclient backendは6接続で、これは低負荷時の観測に限る。
+- asia2のcheckoutは既存の `84806f5` のまま。今回の対象はアプリ3台で、asia2の設定配置・DB再起動・SQLログtruncateは行っていない。
+
+切替前3台のアクセスログ・SQLログ・nginx site設定は手元 `/tmp/isu15-regional-prod.sxrKeS/*-before.tar.gz` に保全。
+実行ログは同ディレクトリの `asia1-deploy.log`（認証失敗）、`asia1-deploy-retry.log`、`edges-deploy.log`。
+旧アプリ版は `84806f5`。切り戻しは下記のとおりedge経路を先に戻し、追加confの明示撤去が必要。
+実サーバー全体の再起動、初期化60秒、正常ユーザー操作・前後ベンチ、スコア改善は未検証。
+以下の設計・手元試験・手順の「未実施」は、その記録時点の状態を表す。現在の反映状態はこの節を参照する。
+
 ## 採点条件と優先した理由
 
 [公式マニュアル](manual-2026-10-31.md#スコアの計算)では、投稿受理後に期間終了前の友達フィード検証が成功すると通常10点、最後の期間20点。
