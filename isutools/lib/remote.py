@@ -14,6 +14,7 @@ def commit(config):
 
 def remote_deploy(config, host):
     root = config.root
+    profiling = config.get('PROFILING_ENABLED', '1') != '0'
     state = config.server_root / '.isutools'
     state.mkdir(parents=True, exist_ok=True)
     paths = sorted(config.server_root.glob('local/*/bin'))
@@ -51,7 +52,8 @@ def remote_deploy(config, host):
         step = 'build'
         started = time.monotonic()
         npm('app', root / config.require('APP_DIR'))
-        npm('profiler', config.tools / 'profiler')
+        if profiling:
+            npm('profiler', config.tools / 'profiler')
         if config.get('BUILD_CMD'):
             config.run(['bash', '-c', config.get('BUILD_CMD')], cwd=root / config.require('APP_DIR'))
         seconds = int(time.monotonic() - started)
@@ -85,9 +87,12 @@ def remote_deploy(config, host):
             print(f'⚠ {service} はこのホストで無効です（再起動していません）')
         step = 'pprotein'
         for service in ['pprotein-agent.service', 'pprotein.service']:
-            if enabled(service):
+            if not profiling:
+                if enabled(service) or config.run(['systemctl', 'is-active', service], capture=True, check=False).returncode == 0:
+                    config.sudo('systemctl', 'disable', '--now', service)
+            elif enabled(service):
                 config.sudo('systemctl', 'restart', service)
-        if host == config.require('PPROTEIN_HOST') and enabled('pprotein.service'):
+        if profiling and host == config.require('PPROTEIN_HOST') and enabled('pprotein.service'):
             # Type=simpleのrestart完了時点ではHTTP待受がまだ始まっていない場合がある。
             # 設定POSTは再送せず、読み取りAPIの起動待ちだけを上限付きで再試行する。
             step = 'pprotein-health'
@@ -103,7 +108,7 @@ def remote_deploy(config, host):
                                 '-H', 'Content-Type: application/yaml', '--data-binary', '@' + str(path),
                                 f'http://127.0.0.1:9000/api/{endpoint}/config'], capture=True)
         step = 'truncate'
-        for key in ['NGINX_LOG', 'SLOW_LOG']:
+        for key in (['NGINX_LOG', 'SLOW_LOG'] if profiling else []):
             log = Path(config.require(key))
             if config.sudo('test', '-e', log, check=False).returncode == 0:
                 # O_CREATを使うとstickyディレクトリでfs.protected_regularに拒否される。
