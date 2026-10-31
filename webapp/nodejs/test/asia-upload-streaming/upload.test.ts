@@ -4,7 +4,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import jpeg from 'jpeg-js';
 import { application, database, headers, nginx, response } from './harness.ts';
-const base = process.env.ASIA_NGINX_BASE ?? '993e1b0dd58d68d7b63e77bff26d046d2a0173b3';
+const base = process.env.ASIA_NGINX_BASE ?? '053af6eca4400864c62269ca6188d6701dd8a7a3';
 const path = '/api/me/profile-image';
 const image = (width = 1, height = 1) => jpeg.encode({ width, height, data: Buffer.alloc(width*height*4, 128) }, 80).data;
 // Incremental client respects write()/drain; no fetch buffering masks backpressure.

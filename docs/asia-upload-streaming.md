@@ -4,7 +4,7 @@
 
 ## 基準・変更
 
-基準mainは `993e1b0dd58d68d7b63e77bff26d046d2a0173b3`。別の投稿期間転送PRと同じ基準から作った独立ブランチ `perf/asia-upload-streaming` である。Nodeコード、他地域、Memories、画像配信、サービス、DB、32MiB本文上限は変更していない。
+基準mainは `053af6eca4400864c62269ca6188d6701dd8a7a3`。別の投稿期間転送PRと同じ基準から作った独立ブランチ `perf/asia-upload-streaming` である。Nodeコード、他地域、Memories、画像配信、サービス、DB、32MiB本文上限は変更していない。
 
 完全一致の `/api/me/profile-image` でPUTだけをnamed locationへ渡し、HTTP/1.1、`proxy_request_buffering off`、`proxy_next_upstream off` を使う。named locationへの内部遷移はメソッド・本文・元のURI/queryを維持する。PUT以外は従来のlocal APIと本文バッファ・再送設定を保つ。認証・abuse分類・JPEG全体検証は現行アプリが行う。
 
@@ -29,19 +29,19 @@ npm run check
 
 | 順序 | nginx受信一時ファイル警告 | nginx write_bytes差分 | HTTP ms | nginx RSS KiB |
 |---|---:|---:|---:|---:|
-| baseline | 1 | 8,388,888 B | 177.8 | 10376 |
-| streaming | 0 | 65 B | 140.5 | 10148 |
-| streaming | 0 | 65 B | 127.5 | 10148 |
-| baseline | 1 | 8,388,888 B | 190.7 | 10376 |
+| baseline | 1 | 8,388,888 B | 165.7 | 10112 |
+| streaming | 0 | 65 B | 133.8 | 10128 |
+| streaming | 0 | 65 B | 141.8 | 10128 |
+| baseline | 1 | 8,388,888 B | 159.9 | 10112 |
 
-1.4秒の送信停止を先行PUTに入れ、250ms後に正常画像を送ると、後続の応答は **18.6 → 1163.7ms**。同時の投稿期間GETは7.4 → 6.9msだった。正常画像の待ちを大きく増やすため、I/O削減だけでは採用しない。
+1.4秒の送信停止を先行PUTに入れ、250ms後に正常画像を送ると、後続の応答は **25.9 → 1172.1ms**。同時の投稿期間GETは13.7 → 9.7msだった。正常画像の待ちを大きく増やすため、I/O削減だけでは採用しない。
 
 新品のNodeプロセスで2.5秒の遅いPUTと8本×16MiBのアップロードを重ねた各1回の比較:
 
 | 方式 | Node開始RSS MiB | 待機時RSS MiB | 待機までの最大RSS MiB | incoming最大buffer B | 8本平均ms | 他API ms |
 |---|---:|---:|---:|---:|---:|---:|
-| baseline | 124.2 | 204.6 | 204.6 | 0 | 1567.5 | 276.2 |
-| streaming | 124.5 | 120.4 | 127.0 | 123,674 | 3117.5 | 5.4 |
+| baseline | 123.0 | 237.0 | 237.0 | 73,728 | 1395.3 | 189.5 |
+| streaming | 123.2 | 125.5 | 125.5 | 130,775 | 3508.5 | 5.6 |
 
 streamingで一部クライアントのwrite/drainが本文完了前に停止し、待機中に128MiB全量がNode RSSへ積み上がる挙動は観測しなかった。client側の書込済みbytesはOS/socket/Docker側の待機分を含み、Nodeで消費済みのbytesではない。buffer値は20msサンプルのためbaselineの短い受信を取り逃す場合がある。比較中の進行段階が異なり、この表を同量処理時のRSS削減率とは扱わない。
 
@@ -66,8 +66,10 @@ DISCORD_WEBHOOK_URL= task status
 ssh asia1 'sudo nginx -t && systemctl is-active nginx isureal-nodejs.service'
 ```
 
-`task deploy` は全4台を指定ブランチへ反映し、enabledサービス再起動・DB再起動・ログ切詰めを含む。必要な計測を保全してから実行する。statusの4台のSHAがPR headと一致し、asia2のappもactiveであることを確認。PR本文のファイルhash照合と401疎通確認に続き、[ポータル](https://portal.isucon.net/contestant/benchmark_jobs) のEnqueueを1回押す。API実動作未確認のためCLIベンチは案内しない。`task bench` 自体にもデプロイがある。
+`task deploy` は全4台を指定ブランチへ反映し、enabledサービス再起動・DB再起動を含む。必要な計測を保全してから実行する。statusの4台のSHAがPR headと一致し、asia2のappもactiveであることを確認。PR本文のファイルhash照合と401疎通確認に続き、[ポータル](https://portal.isucon.net/contestant/benchmark_jobs) のEnqueueを1回押す。API実動作未確認のためCLIベンチは案内しない。`task bench` 自体にもデプロイがある。
 
-単独試験の切戻しは、PR headから別のrollbackブランチを作り、本PR実装コミットだけをrevert・pushしてdeployする。具体的なSHAとコマンドはPR本文に記載する。DB操作は不要。rsyncは削除済みsnippetを実機から削除しないが、locationがなくなれば参照されない。
+単独試験の切戻しは、確認済み基準mainから別のrollbackブランチを作り、pushしてdeployする。固定SHAとコマンドはPR本文に記載する。DB操作は不要。rsyncは削除済みsnippetを実機から削除しないが、locationがなくなれば参照されない。
 
 他方のPRがmainへ入った場合は最新mainを本ブランチへ取り込み、上の実試験を再実行してからpushする。本PRもマージ済みの状態から戻す場合は最新mainを起点に本PRだけをrevertし、他の変更を保持する。
+
+提出中に更新されたmainの計測停止（#72）を両候補へ取り込み、再検証した。業務処理と比較対象のlocationは同じで、試験用計測だけをfixture内で有効にしている。本番の計測停止設定は維持する。最新のdeployは計測停止modeではpproteinを停止し、既存ログの切詰めを省く。
