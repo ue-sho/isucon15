@@ -73,7 +73,7 @@ GitHub CLIが未認証のためIssueへの転記は未実施。
 
 ## Redisで検証済み画像URLを共有する（2026-10-31）
 
-作業ブランチ: `perf/image-authorization-redis`。基点は `5b7361f`。Issue #37の追加改善案で、本番反映・ベンチは未実施。ユーザーからRedis依存の追加とローカル実装・検証の許可を得ている。
+作業ブランチ: `perf/image-authorization-redis`。作業開始の基点は `5b7361f`、PR作成前にmain `589f52d` へ載せ直し、#56の画像DB転送のbase64化を維持した。[PR #64](https://github.com/ue-sho/isucon15/pull/64)。Issue #37の追加改善案で、本番反映・ベンチは未実施。ユーザーからRedis依存の追加とローカル実装・検証の許可を得ている。
 
 ### 通常経路と整合性
 
@@ -116,8 +116,8 @@ IMAGE_AUTH_CPU_BENCH=1 IMAGE_AUTH_NGINX_TEST=1 sh test/helpers/run-image-authori
 
 確認対象: 別worker・3地域の命中時0 SQL、未配置ファイルの再生成、不正署名・期限・重複、プロフィール削除、RealMoji差し替え・削除、投稿削除、投稿者退会、古い結果の再登録競合、鍵変更競合、同じ所有者の並行更新と別所有者の登録、4xx時の解放と5xx時の保留、実reset、アプリ再起動、RedisのSIGKILLからのAOF復旧、接続断時のDB確認と更新拒否、実nginxの本文・内部URL拒否・Range応答。
 
-通常のテスト一式は `node --test --test-concurrency=1 'test/**/*.test.ts'` で102成功・失敗0・15skip。これはRedis導入前からのDB等のopt-in試験を含むskipであり、全ての本番条件の通過を意味しない。並列再実行では既存の `jpeg-decoder` と `pprotein` の2ファイルが失敗し、単独では11件とも成功した。並列時の原因は未確定。追加した専用統合試験は実nginx・CPU比較込みで17成功・失敗0・skip0。型検査と試験スクリプトの構文検査も成功。
+通常のテスト一式は、main統合後も制限を外したローカル環境で `node --test --test-concurrency=1 'test/**/*.test.ts'` を実行し、102成功・失敗0・15skip。これはRedis導入前からのDB等のopt-in試験を含むskipであり、全ての本番条件の通過を意味しない。制限環境の再実行では既存の `jpeg-decoder` と `pprotein` の2ファイルが失敗し、単独では11件とも成功した。失敗の詳細原因は未確定。追加した専用統合試験はmain統合後も実nginx・CPU比較込みで17成功・失敗0・skip0。型検査と試験スクリプトの構文検査も成功。
 
-合成CPU比較は250要求を1組として順序を交互に5組ずつ測定し、既存の1 SQL経路とRedis命中経路を比較した。NodeプロセスのCPU時間の中央値は108.732ms → 86.189ms（約20.7%減）、経過時間の中央値は243.463ms → 122.188ms。画像SQLは各1,250要求で1,250回 → 0回。URLの生成は計測外、実データは使用していない。Redis・PostgreSQL・nginxプロセスのCPUはこのCPU時間に含まない。raw結果は `/tmp/isu15-image-authorization-final.log`、通常試験は `/tmp/isu15-image-authorization-all-tests.log` に保存し、実環境の低下率として扱わない。
+合成CPU比較は250要求を1組として順序を交互に5組ずつ測定し、既存の1 SQL経路とRedis命中経路を比較した。main統合前はNodeプロセスのCPU時間中央値が108.732ms → 86.189ms（約20.7%減）、統合後の再計測は95.458ms → 79.850ms（約16.4%減）、経過時間中央値は228.133ms → 113.517msだった。画像SQLは各1,250要求で1,250回 → 0回。URLの生成は計測外、実データは使用していない。Redis・PostgreSQL・nginxプロセスのCPUはこのCPU時間に含まない。raw結果は `/tmp/isu15-image-authorization-final.log`（統合前）と `/tmp/isu15-image-authorization-integrated.log`（統合後）、通常試験の成功結果は `/tmp/isu15-image-authorization-all-tests-verified.log` に保存し、実環境の低下率として扱わない。
 
-未確認: 本番でのキャッシュ命中率、全APIの実配置、初期化60秒以内、Redis追加後の全体CPU・I/O・得点。CPU比較は同じ有効URLの連続取得に限定した合成計測であり、JPEG検証やフィードの署名生成はこの変更で省略しない。Issue #37/#2への転記はGitHub CLI未認証のため未実施。
+未確認: 本番でのキャッシュ命中率、全APIの実配置、初期化60秒以内、Redis追加後の全体CPU・I/O・得点。CPU比較は同じ有効URLの連続取得に限定した合成計測であり、JPEG検証やフィードの署名生成はこの変更で省略しない。実装・検証の共有先はPR #64と関連Issue #37。
