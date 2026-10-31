@@ -75,6 +75,37 @@ class RemoteDeployTests(Sandbox):
         self.assertTrue(copied.is_symlink())
         self.assertEqual(copied.read_text(), 'server {}\n')
 
+    def test_postgresql_config_is_copied_before_cluster_restart(self):
+        service = 'postgresql@16-main.service'
+        with (self.work / 'isutools/config.env').open('a') as file:
+            file.write(f'DB_SERVICE={service}\n')
+        write(self.hosts / 's1/enabled', f'{service}\nnginx\nisuapp-node.service\n')
+        path = 'postgresql/16/main/conf.d/zz-isutools-slowlog.conf'
+        write(self.work / 's1/etc' / path, 'log_min_duration_statement = 0\n')
+        self.deploy()
+        self.assertEqual((self.hosts / 's1/etc' / path).read_text(), 'log_min_duration_statement = 0\n')
+        calls = self.calls()
+        self.assertLess(calls.index(f'systemctl restart {service}'), calls.index('systemctl restart isuapp-node.service'))
+        self.assertIn(f'systemctl is-active {service}', calls)
+
+    def test_disabled_postgresql_is_not_started(self):
+        with (self.work / 'isutools/config.env').open('a') as file:
+            file.write('DB_SERVICE=postgresql@16-main.service\n')
+        self.deploy()
+        self.assertNotIn('systemctl restart postgresql', self.calls())
+
+    def test_postgresql_health_failure_stops_before_app_restart(self):
+        service = 'postgresql@16-main.service'
+        with (self.work / 'isutools/config.env').open('a') as file:
+            file.write(f'DB_SERVICE={service}\n')
+        write(self.hosts / 's1/enabled', f'{service}\nnginx\nisuapp-node.service\n')
+        write(self.hosts / 's1/inactive', f'{service}\n')
+        result = self.deploy(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('step=db-health', result.stdout)
+        self.assertIn(f'{service} が起動していません', result.stdout)
+        self.assertNotIn('systemctl restart isuapp-node.service', self.calls())
+
     def test_respects_manual_profiling_service_state(self):
         self.deploy()
         self.assertNotIn('systemctl restart pprotein', self.calls())
@@ -87,6 +118,38 @@ class RemoteDeployTests(Sandbox):
         self.assertNotIn('systemctl disable', self.calls())
 
     def test_truncates_logs(self):
+        self.deploy()
+        self.assertEqual((self.logs / 'nginx/access.log').stat().st_size, 0)
+        self.assertEqual((self.logs / 'mysql/slow.log').stat().st_size, 0)
+
+    def test_applies_analysis_configs_only_on_pprotein_host(self):
+        with (self.work / 'isutools/config.env').open('a') as file:
+            file.write('PPROTEIN_HOST=s1\n')
+        write(self.hosts / 's1/enabled', 'nginx\nisuapp-node.service\npprotein.service\n')
+        self.deploy()
+        calls = self.calls()
+        for endpoint in ['httplog', 'slowlog']:
+            self.assertIn(f'http://127.0.0.1:9000/api/{endpoint}/config', calls)
+        self.assertLess(calls.index('systemctl restart pprotein.service'), calls.index('/api/slowlog/config'))
+
+    def test_postgresql_log_permissions_are_preserved(self):
+        with (self.work / 'isutools/config.env').open('a') as file:
+            file.write('DB_SERVICE=postgresql@16-main.service\n')
+        log = self.logs / 'mysql/slow.log'
+        log.chmod(0o640)
+        self.deploy()
+        self.assertEqual(log.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(log.stat().st_size, 0)
+
+    def test_truncate_does_not_request_file_creation(self):
+        # protected_regular=2を想定し、O_CREATを伴うtruncateを拒否する。
+        directory = self.work / 'local/node/bin'
+        real_truncate = shutil.which('truncate')
+        self.assertIsNotNone(real_truncate)
+        write(directory / 'truncate', '#!' + sys.executable + '\nimport os, sys\n'
+              'if "--no-create" not in sys.argv: sys.exit(1)\n'
+              f'os.execv({real_truncate!r}, ["truncate", *sys.argv[1:]])\n')
+        (directory / 'truncate').chmod(0o755)
         self.deploy()
         self.assertEqual((self.logs / 'nginx/access.log').stat().st_size, 0)
         self.assertEqual((self.logs / 'mysql/slow.log').stat().st_size, 0)

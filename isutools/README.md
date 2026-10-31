@@ -77,7 +77,7 @@ PORTAL_CSRF_TOKEN="<CSRFトークン>"
 | `APP_SERVICE` | アプリのsystemdサービス名。初期値から必ず変更 |
 | `BUILD_CMD` | ビルドコマンド。不要なら空 |
 | `NODE_BIN_DIR` | Node / npmの場所。`/home/isucon/local/*/bin` なら空でよい |
-| `DB_SERVICE` | `mysql` または `mariadb` |
+| `DB_SERVICE` | DBのsystemdサービス名。今回は `postgresql@16-main.service` |
 | `NGINX_LOG` / `SLOW_LOG` | 計測ログのパス |
 | `PPROTEIN_HOST` | pprotein本体を置くホスト。初期値は `s3` |
 | `ENV_FILES` | ISUCON提供のenvファイル。空ならアプリunitの `EnvironmentFile=` から検出 |

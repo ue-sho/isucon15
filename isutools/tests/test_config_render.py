@@ -69,6 +69,7 @@ class RenderTests(unittest.TestCase):
         values = read_env(ROOT / 'isutools/config.env')
         values.update(HOSTS='s1 s2 s3', PPROTEIN_HOST='s3', APP_SERVICE='isuapp-node.service', S1_IP='10.0.0.1', S2_IP='10.0.0.2', S3_IP='10.0.0.3')
         self.config = Config(self.root, values)
+        self.config.values['SLOW_LOG'] = '/var/log/mysql/mysql-slow.log'
         for host in self.config.hosts:
             (self.root / host / "etc/mysql").mkdir(parents=True)
 
@@ -102,10 +103,21 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn('adm mysql', agent)
         self.assertTrue((self.root / 's2/etc/mysql/conf.d/zz-isutools-slowlog.cnf').exists())
 
+    def test_postgresql_agent_uses_postgres_group_and_log(self):
+        (self.root / 's1/etc/mysql').rmdir()
+        (self.root / 's1/etc/postgresql/16/main/conf.d').mkdir(parents=True)
+        self.config.values['SLOW_LOG'] = '/var/log/postgresql/postgresql-slow.log'
+        render_all(self.config)
+        agent = self.text('s1/etc/systemd/system/pprotein-agent.service')
+        self.assertIn('SupplementaryGroups=adm postgres', agent)
+        self.assertIn('PPROTEIN_SLOWLOG=/var/log/postgresql/postgresql-slow.log', agent)
+
     def test_pprotein_service_moves_to_selected_host(self):
         render_all(self.config)
         service = 'etc/systemd/system/pprotein.service'
         self.assertTrue((self.root / 's3' / service).exists())
+        self.assertIn('Environment=PATH=/home/isucon/isutools/pprotein/bin:',
+                      self.text('s3/' + service))
         self.assertFalse((self.root / 's1' / service).exists())
         self.config.values['PPROTEIN_HOST'] = 's2'
         render_all(self.config)

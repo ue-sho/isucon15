@@ -49,7 +49,9 @@ class Sandbox(unittest.TestCase):
         shutil.copy(ROOT / '.gitignore', root / '.gitignore')
         shutil.copy(ROOT / 'Taskfile.yml', root / 'Taskfile.yml')
         path = root / 'isutools/config.env'
-        path.write_text(path.read_text() + '\nAPP_SERVICE=isuapp-node.service\nAPP_DIR=webapp/nodejs\n')
+        # テスト用ホスト・DBを実運用のconfig.envから独立させる。
+        path.write_text(path.read_text() + '\nHOSTS="s1 s2 s3"\nPPROTEIN_HOST=s3\n'
+                        'DB_SERVICE=mysql\nAPP_SERVICE=isuapp-node.service\nAPP_DIR=webapp/nodejs\n')
         write(root / 'isutools/hosts.env', 'S1_IP=10.0.0.1\nS2_IP=10.0.0.2\nS3_IP=10.0.0.3\n')
 
     def config(self, root=None, **values):

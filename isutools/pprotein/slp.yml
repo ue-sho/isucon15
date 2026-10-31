@@ -1,0 +1,6 @@
+# statement と execute を集計する。Parse/Bind はアダプター側で除外。
+# トランザクションやDELETE、WITHなどを除外せず、全実行を集計する。
+bundle_values: true
+bundle_where_in: true
+filters: 'true'
+limit: 65536

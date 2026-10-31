@@ -42,7 +42,8 @@ def render_all(config):
                  'Environment="NODE_OPTIONS=--require /home/isucon/isutools/profiler/profiler.cjs"')
         template('pprotein-agent.service', systemd / 'pprotein-agent.service',
                  NGINX_LOG=config.require('NGINX_LOG'), SLOW_LOG=config.require('SLOW_LOG'),
-                 LOG_GROUPS='adm mysql' if mysql.is_dir() else 'adm')
+                 LOG_GROUPS='adm postgres' if (etc / 'postgresql').is_dir()
+                 else ('adm mysql' if mysql.is_dir() else 'adm'))
         if host == pprotein:
             template('pprotein.service', systemd / 'pprotein.service')
         else:

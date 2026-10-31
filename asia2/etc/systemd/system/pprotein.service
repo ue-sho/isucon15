@@ -6,6 +6,7 @@ After=network.target
 [Service]
 User=isucon
 Environment=PORT=9000
+Environment=PATH=/home/isucon/isutools/pprotein/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 StateDirectory=pprotein
 WorkingDirectory=/var/lib/pprotein
 ExecStart=/usr/local/bin/pprotein
