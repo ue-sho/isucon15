@@ -2,6 +2,24 @@
 
 2026-10-31、Issue #13 / PR #32の初期化残件を補完する。基点は `3a19a28`（#32マージ後）。有効期限の丸め・延長、署名アルゴリズム、キャッシュ容量・60秒TTLは変更しない。
 
+## 12:50 JSTのデプロイ失敗と復旧版
+
+ユーザーがup SQLを実行してCOMMITまで成功し、共有DBの読み取りでも `singleton=true / generation=1` を確認した。**migrationは適用済みで、再実行不要。**
+
+続く `ff664cc` のデプロイはeurope1・america1・asia2が成功し、asia1が8080の `EADDRINUSE` で失敗した。直前の反映版は `c5edca0`。asia1には地域別の補助systemdサービスがあり、古いmain基点の `ff664cc` はポート8080固定だったため、America用サービスが8080を占有し、本体とEurope用サービスが再起動を繰り返していた。rsyncは追加unitを削除しないので、古いコードの反映だけではこの構成を戻せない。
+
+PR #33へ最新main `4f4a0a9` をマージし、`ISUREAL_PORT` 対応、本体8080・Europe8081・America8082のunit設定、最新nginx/PostgreSQL設定、一覧の50件化を保持した。世代管理の製品コードとSQLにはmain側との競合なし。統合後の型チェック成功、`IMAGE_SIGNATURE_GENERATION_TEST=1 npm test` は80成功・失敗0・3skip（画像DB・投稿ロックDB・地域別API DB）。既存isutoolsのbootstrap/deployテストはmacOSでGNU truncateオプションやjournalctl等の環境差により未通過で、成功扱いにはしていない。
+
+この追補を含むpush済み版を同じブランチから再デプロイする。最新mainの既存設定を維持し、補助サービスやnginx設定を手動で削除しない。
+
+```sh
+task deploy BRANCH=fix/image-signature-cache-initialize && task status
+ssh asia1 'systemctl is-active isureal-nodejs.service isureal-nodejs-europe.service isureal-nodejs-america.service'
+ssh asia1 'sudo -n ss -ltnp "( sport = :8080 or sport = :8081 or sport = :8082 )"'
+```
+
+全台の新SHA、asia1の3サービスすべてactive、8080/8081/8082の待受を確認してからベンチを再開する。`task status` のapp表示は本体だけで、補助2サービスの確認を代用しない。この復旧版の再デプロイ・再ベンチは作業者が実行する。
+
 ## 初期化の保証
 
 共有PostgreSQLに1行の `image_signature_cache_state` を置き、`reset.sql` のデータ復元と同じトランザクションで `generation` を増やす。COMMITを全リージョンに共通の無効化点とする。途中失敗では世代もロールバックし、行が存在しない場合は初期化を失敗させる。最初にこの行を更新・ロックするため、同時に走るresetも直列化される。
