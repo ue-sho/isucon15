@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind, parseQuery, rawQuery } from "./bind.ts";
-import { imageSignature, imageSigningKey } from "./image_signature.ts";
+import { imageSignature, imageSigningKey, withImageSignatureCacheGeneration } from "./image_signature.ts";
 import { blobResponse } from "./response.ts";
 import { unix } from "./time.ts";
 import type { Env, HandlerContext } from "./server.ts";
@@ -40,9 +40,10 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
 
-    const owner = await h.db.get<{ secret_key_hash: string; owner_user_id: string; created_at: Temporal.Instant }>(
+    const owner = await h.db.get<{ secret_key_hash: string; owner_user_id: string; created_at: Temporal.Instant; signature_cache_generation: string }>(
       `
-   SELECT u.secret_key_hash, i.owner_user_id, i.created_at
+   SELECT u.secret_key_hash, i.owner_user_id, i.created_at,
+     (SELECT generation::text FROM image_signature_cache_state WHERE singleton) AS signature_cache_generation
    FROM image_objects i JOIN users u ON u.id = i.owner_user_id
    WHERE i.id = $1 AND u.status = 'active'
   `,
@@ -52,7 +53,9 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
     const key = imageSigningKey(owner.secret_key_hash);
-    if (!timingSafeEqual(sig, imageSignature(key, input.imageId, input.exp))) {
+    const expected = withImageSignatureCacheGeneration(owner.signature_cache_generation,
+      () => imageSignature(key, input.imageId, input.exp));
+    if (!timingSafeEqual(sig, expected)) {
       c.set("abuse", "invalid_signature");
       throw new APIError(403, "image_forbidden");
     }

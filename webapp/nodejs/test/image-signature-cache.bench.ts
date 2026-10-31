@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { imageSignature } from "../src/image_signature.ts";
+import { imageSignature, withImageSignatureCacheGeneration } from "../src/image_signature.ts";
 import { referenceImageSignature } from "./image-signature-cache-reference.ts";
 
 const scenarios = ["repeated", "unique", "large-unique"] as const;
@@ -25,7 +25,8 @@ if (childFlag === "--child") {
   assert.ok(scenarios.includes(scenarioArg as Scenario));
   assert.ok(global.gc, "Run with --expose-gc");
   const scenario = scenarioArg as Scenario;
-  const sign = variant === "original" ? referenceImageSignature : imageSignature;
+  const sign = variant === "original" ? referenceImageSignature
+    : (...args: Parameters<typeof imageSignature>) => withImageSignatureCacheGeneration("1", () => imageSignature(...args));
   // Warm V8/OpenSSL, without warming measured cache entries.
   for (let i = 0; i < 100; i++) sign(key, "warmup-" + i, exp - 1);
   global.gc();

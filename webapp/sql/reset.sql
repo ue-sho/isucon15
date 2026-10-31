@@ -2,6 +2,16 @@ SET session_replication_role = replica;
 
 BEGIN;
 
+-- Invalidate signature caches in every region at the same commit as the reset.
+-- Lock this singleton first so concurrent resets cannot publish out of order.
+DO $$
+BEGIN
+  UPDATE image_signature_cache_state SET generation = generation + 1 WHERE singleton;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'image signature cache generation is missing';
+  END IF;
+END $$;
+
 TRUNCATE ip_bans, login_sessions, administrator_sessions, friendships, friend_requests, follows, block_relations;
 
 DELETE FROM notifications WHERE created_at > (SELECT created_at FROM initial_data_boundary);
