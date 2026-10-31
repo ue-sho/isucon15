@@ -7,6 +7,7 @@ import pg from "pg";
 import { DB } from "../src/db.ts";
 import { newServer } from "../src/server.ts";
 import { sha256Hex } from "../src/session.ts";
+import { delayedTCP } from "./helpers/delayed-tcp.ts";
 
 // ローカルの新規テストDBのみ。実サービスの設定を読まない。
 const port = process.env.REGIONAL_API_TEST_PG_PORT;
@@ -40,11 +41,11 @@ test("地域別アプリの投稿と共有DBの即時反映", { skip: !port }, a
   }
   t.after(async () => { await Promise.all(servers.map((s) => new Promise<void>((resolve, reject) => s.close((err) => err ? reject(err) : resolve())))); });
   const image = jpeg.encode({ data: Buffer.from([255, 0, 0, 255]), width: 1, height: 1 }, 80).data;
-  async function post(region: string, user: string) {
+  async function post(region: string, user: string, baseURL = urls.get(region)!) {
     const body = new FormData();
     body.set("image", new Blob([new Uint8Array(image)], { type: "image/jpeg" }), "fixture.jpg");
     body.set("caption", "fixture"); body.set("visibility", "friends"); body.set("location_kind", "none");
-    return fetch(urls.get(region)! + "/api/posts", { method: "POST", headers: { Authorization: `Bearer ${user}`, "X-Client-IP": "203.0.113.1" }, body });
+    return fetch(baseURL + "/api/posts", { method: "POST", headers: { Authorization: `Bearer ${user}`, "X-Client-IP": "203.0.113.1" }, body });
   }
   for (const region of ["europe", "america"]) {
     const created = await post(region, region);
@@ -69,5 +70,55 @@ test("地域別アプリの投稿と共有DBの即時反映", { skip: !port }, a
     await admin.query("INSERT INTO block_relations(id,blocker_id,blocked_id) VALUES($1::text,$1::text,$2::text)", [region, region + "-friend"]);
     const blocked = await fetch(urls.get(region)! + "/api/feeds/friends", { headers });
     assert.deepEqual((await blocked.json()).items, []);
+  }
+
+  if (process.env.REGIONAL_API_BENCH_RTT_MS) {
+    const rttMs = Number(process.env.REGIONAL_API_BENCH_RTT_MS);
+    const dbLink = await delayedTCP(Number(port), rttMs);
+    t.after(() => dbLink.close());
+    const remoteApp = await newServer({ ...config, region: "europe", dbPort: String(dbLink.port) }, 2);
+    const remoteServer = serve({ fetch: remoteApp.fetch, hostname: "127.0.0.1", port: 0 });
+    servers.push(remoteServer);
+    if (!remoteServer.listening) await new Promise<void>((resolve) => remoteServer.once("listening", resolve));
+    const remoteAddress = remoteServer.address();
+    assert.ok(remoteAddress && typeof remoteAddress !== "string");
+    const nearPort = Number(new URL(urls.get("europe")!).port);
+    const httpLink = await delayedTCP(nearPort, rttMs);
+    t.after(() => httpLink.close());
+    const targets = [
+      { mode: "remote-sql", baseURL: `http://127.0.0.1:${remoteAddress.port}` },
+      { mode: "forward-http", baseURL: `http://127.0.0.1:${httpLink.port}` },
+    ];
+    const timings: Record<string, { post: number[]; feed: number[] }> = {};
+    for (const target of targets) timings[target.mode] = { post: [], feed: [] };
+    const samples = 6;
+    const friendPost = (await admin.query("SELECT id FROM posts WHERE author_id='europe-friend' AND deleted_at IS NULL")).rows[0].id;
+    // 反復間の条件を揃える。最初の1回は接続・prepared statementのwarmupとして除外する。
+    for (let sample = -1; sample < samples; sample++) {
+      for (const target of targets) {
+        const id = `${target.mode}-${sample}`;
+        await admin.query("INSERT INTO users(id,username,secret_key_hash,display_name,region) VALUES($1::text,$1::text,$2,$1::text,'europe')", [id, "ab".repeat(32)]);
+        await admin.query("INSERT INTO login_sessions(id,user_id,token_hash) VALUES($1,$1,$2)", [id, sha256Hex(id)]);
+        const pair = [id, "europe-friend"].sort();
+        await admin.query("INSERT INTO friendships(id,user_low_id,user_high_id) VALUES($1,$2,$3)", [id, ...pair]);
+        const beginPost = performance.now();
+        const created = await post("europe", id, target.baseURL);
+        assert.equal(created.status, 201, await created.clone().text());
+        await created.arrayBuffer();
+        const postMs = performance.now() - beginPost;
+        const beginFeed = performance.now();
+        const response = await fetch(target.baseURL + "/api/feeds/friends", { headers: { Authorization: `Bearer ${id}`, "X-Client-IP": "203.0.113.3" } });
+        assert.equal(response.status, 200);
+        const feed = await response.json();
+        assert.deepEqual(feed.items.map((item: any) => item.id), [friendPost]);
+        const feedMs = performance.now() - beginFeed;
+        if (sample >= 0) { timings[target.mode].post.push(postMs); timings[target.mode].feed.push(feedMs); }
+      }
+    }
+    const summarize = (values: number[]) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      return { meanMs: Math.round(values.reduce((sum, value) => sum + value, 0) / values.length), medianMs: Math.round((sorted[2] + sorted[3]) / 2), maxMs: Math.round(sorted.at(-1)!) };
+    };
+    console.log("[regional-local-bench]", JSON.stringify({ rttMs, samples, warmups: 1, results: Object.fromEntries(Object.entries(timings).map(([mode, times]) => [mode, { post: summarize(times.post), feed: summarize(times.feed) }])) }));
   }
 });
