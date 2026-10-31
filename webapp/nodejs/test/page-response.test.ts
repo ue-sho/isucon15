@@ -83,7 +83,11 @@ function setup(kind: Kind, count: number, filtered = false) {
 
 for (const kind of ["memories", "date", "comments", "realmojis", "relationships", "feed", "ranked"] as const) {
   for (const count of [0, 49, 50, 51]) {
-    test(`${kind}: ${count}件の本文・順序・hasMoreと署名回数`, async () => {
+    test(`${kind}: ${count}件の本文・順序・hasMoreと署名回数`, async (t) => {
+      // この試験は51件目の生成省略を検証する。署名LRUの命中は別試験で確認する。
+      // TemporalのURL期限は変えず、LRUへの格納判定だけを対象外にする。
+      const future = Date.now() + 48 * 60 * 60 * 1000;
+      t.mock.method(Date, "now", () => future);
       const { app, path, records } = setup(kind, count, kind === "feed" || kind === "ranked");
       const realCreateHmac = crypto.createHmac;
       let calls = 0;

@@ -3,6 +3,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { APIError } from "./api_error.ts";
 import { must, type DB, type Tx } from "./db.ts";
 import { setImageKey, userColumnsAs, userFromRow, type User } from "./user.ts";
+import { withImageSignatureCacheGeneration } from "./image_signature.ts";
 import { logWarn } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
 
@@ -24,7 +25,7 @@ export function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-async function getSessionFromHeader(c: Context<Env>, db: DB): Promise<Session | null> {
+async function getSessionFromHeader(c: Context<Env>, db: DB): Promise<{ session: Session; generation: unknown } | null> {
   const authHeader = c.req.header("Authorization") ?? "";
   if (authHeader === "") {
     return null;
@@ -39,7 +40,8 @@ async function getSessionFromHeader(c: Context<Env>, db: DB): Promise<Session | 
   const tokenHash = sha256Hex(token);
   const row = await db.get(
     `
-		SELECT s.user_id, s.token_hash, s.created_at, ${userColumnsAs("u", "user")}
+		SELECT s.user_id, s.token_hash, s.created_at, ${userColumnsAs("u", "user")},
+      (SELECT generation::text FROM image_signature_cache_state WHERE singleton) AS signature_cache_generation
 		FROM login_sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
 		  AND s.active = true AND u.status = 'active'
@@ -51,17 +53,20 @@ async function getSessionFromHeader(c: Context<Env>, db: DB): Promise<Session | 
   }
   const user = userFromRow(row, "user");
   setImageKey(user);
-  return { user, region: user.region, token: "", userID: row.user_id, tokenHash: row.token_hash, createdAt: row.created_at };
+  return {
+    session: { user, region: user.region, token: "", userID: row.user_id, tokenHash: row.token_hash, createdAt: row.created_at },
+    generation: row.signature_cache_generation,
+  };
 }
 
 export function sessionMiddleware(handlerContext: HandlerContext, authRequired: boolean): MiddlewareHandler<Env> {
   return async (c, next) => {
-    const session = await getSessionFromHeader(c, handlerContext.db);
-    if (session === null && authRequired) {
+    const authenticated = await getSessionFromHeader(c, handlerContext.db);
+    if (authenticated === null && authRequired) {
       throw new APIError(401, "invalid_session");
     }
-    c.set("session", session);
-    await next();
+    c.set("session", authenticated?.session ?? null);
+    await withImageSignatureCacheGeneration(authenticated?.generation, next);
   };
 }
 

@@ -14,6 +14,7 @@ import { exportPostsHandler } from "./export_api.ts";
 import { getFeedHandler } from "./feed_api.ts";
 import { createFriendRequestHandler, transitionFriendRequestHandler } from "./friend_request_api.ts";
 import { getImageHandler } from "./image_api.ts";
+import { ImageFiles } from "./image_files.ts";
 import { initializeHandler } from "./initialize.ts";
 import { IPBanList, ipBanMiddleware } from "./ip_ban.ts";
 import { getMemoriesByDateHandler, getMemoriesHandler } from "./memory_api.ts";
@@ -35,6 +36,7 @@ export type HandlerContext = {
   db: DB;
   config: Config;
   ipBans: IPBanList;
+  imageFiles?: ImageFiles;
 };
 
 export type Env = {
@@ -67,6 +69,7 @@ export async function newServer(config: Config, poolSize: number): Promise<Hono<
     db,
     config,
     ipBans: new IPBanList(),
+    imageFiles: config.imageCacheDir ? new ImageFiles(config.imageCacheDir) : undefined,
   };
   e.use(ipBanMiddleware(handlerContext));
 
