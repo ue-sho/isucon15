@@ -34,6 +34,7 @@ function setup(kind: Kind, count: number, filtered = false) {
   const queries: { sql: string; args: unknown[] }[] = [];
   const db = {
     get: async (sql: string) => {
+      if (sql.includes("AS has_posted")) return { has_posted: true, blocked: false, friend: false, friend_of_friend: false };
       if (sql.includes("FROM users")) return user("viewer");
       if (sql.includes("SELECT EXISTS")) return { exists: true };
       throw new Error(`unexpected get: ${sql}`);

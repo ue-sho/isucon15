@@ -1,5 +1,5 @@
 import type { Queryer, Row } from "./db.ts";
-import { getPostWithAuthor, loadViewerContext, canView } from "./post.ts";
+import { getPostWithAuthor, getPostPermissions } from "./post.ts";
 import { setImageKey, userColumnsAs, userFromRow, type User } from "./user.ts";
 
 export type Comment = {
@@ -11,7 +11,7 @@ export type Comment = {
   deletedAt: Temporal.Instant | null;
 };
 
-function commentFromRow(row: Row): Comment {
+export function commentFromRow(row: Row): Comment {
   return {
     id: row.id,
     postID: row.post_id,
@@ -52,18 +52,5 @@ export async function canComment(db: Queryer, viewerID: string, postID: string):
   if (!post) {
     return false;
   }
-  const viewer = await loadViewerContext(db, viewerID);
-  if (!viewer) {
-    return false;
-  }
-  if (!canView(viewer, post.post) || post.post.windowEndedAt) {
-    return false;
-  }
-  if (viewer.user.id === post.post.authorID) {
-    return viewer.hasPostedToday;
-  }
-  if (post.post.visibility === "public") {
-    return true;
-  }
-  return viewer.friends.has(post.post.authorID);
+  return (await getPostPermissions(db, viewerID, post.post)).comment;
 }

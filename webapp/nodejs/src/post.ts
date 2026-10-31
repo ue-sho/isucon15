@@ -109,8 +109,8 @@ export type ViewerContext = {
   blocked: Set<string>;
 };
 
-export async function loadViewerContext(db: Queryer, viewerID: string): Promise<ViewerContext | undefined> {
-  const user = await getUser(db, viewerID);
+export async function loadViewerContext(db: Queryer, viewerID: string, authenticatedUser?: User): Promise<ViewerContext | undefined> {
+  const user = authenticatedUser?.id === viewerID ? authenticatedUser : await getUser(db, viewerID);
   if (!user) {
     return undefined;
   }
@@ -185,11 +185,7 @@ export async function canViewPost(db: Queryer, viewerID: string, postID: string)
   if (!post) {
     return false;
   }
-  const viewer = await loadViewerContext(db, viewerID);
-  if (!viewer) {
-    return false;
-  }
-  return canView(viewer, post.post);
+  return (await getPostPermissions(db, viewerID, post.post)).view;
 }
 
 export async function getFriendIDs(db: Queryer, userID: string): Promise<string[]> {
@@ -217,4 +213,44 @@ export async function getBlockedUserIDs(db: Queryer, userID: string): Promise<Se
     userID,
   );
   return new Set(rows.map((row) => row.id));
+}
+
+// 単一投稿では全友人グラフを転送せず、対象作者との関係だけを照会する。
+// 書込Txから呼ぶ場合も認証時の情報を再利用せず、ロック後のDB状態を見る。
+export async function getPostPermissions(db: Queryer, viewerID: string, post: Post): Promise<{ view: boolean; comment: boolean }> {
+  const row = await db.get<{ has_posted: boolean; blocked: boolean; friend: boolean; friend_of_friend: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1 FROM posts p JOIN posting_windows posted ON posted.id = p.posting_window_id
+      JOIN posting_windows current ON current.region = u.region AND current.ended_at IS NULL
+                                  AND current.local_date = posted.local_date
+      WHERE p.author_id = u.id AND p.deleted_at IS NULL
+    ) AS has_posted,
+    EXISTS (
+      SELECT 1 FROM block_relations
+      WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)
+    ) AS blocked,
+    EXISTS (
+      SELECT 1 FROM friendships
+      WHERE user_low_id = LEAST($1::text, $2::text) AND user_high_id = GREATEST($1::text, $2::text)
+    ) AS friend,
+    ($3::boolean AND EXISTS (
+      SELECT 1 FROM friendships first
+      JOIN friendships second ON
+        (second.user_low_id = $2 AND second.user_high_id = CASE WHEN first.user_low_id = $1 THEN first.user_high_id ELSE first.user_low_id END)
+        OR (second.user_high_id = $2 AND second.user_low_id = CASE WHEN first.user_low_id = $1 THEN first.user_high_id ELSE first.user_low_id END)
+      WHERE first.user_low_id = $1 OR first.user_high_id = $1
+    )) AS friend_of_friend
+    FROM users u WHERE u.id = $1 AND u.status = 'active'
+  `, viewerID, post.authorID, post.visibility === "friends_of_friends" && viewerID !== post.authorID);
+  if (!row) return { view: false, comment: false };
+  const own = viewerID === post.authorID;
+  const visible = own || (!post.windowEndedAt && row.has_posted && !row.blocked && (
+    post.visibility === "public" ||
+    (post.visibility === "friends" && row.friend) ||
+    (post.visibility === "friends_of_friends" && (row.friend || row.friend_of_friend))
+  ));
+  return {
+    view: visible,
+    comment: visible && !post.windowEndedAt && (own ? row.has_posted : post.visibility === "public" || row.friend),
+  };
 }

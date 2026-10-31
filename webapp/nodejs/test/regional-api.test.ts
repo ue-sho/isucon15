@@ -33,7 +33,7 @@ for (const servingRegion of ["europe", "america"]) {
         config: { ...configFromEnv(), region: servingRegion },
         db: { get: async () => {
           lookups++;
-          return { user_id: "user", token_hash: "hash", created_at: Temporal.Now.instant(), region: userRegion };
+          return { user_id: "user", token_hash: "hash", created_at: Temporal.Now.instant(), "user.id": "user", "user.region": userRegion, "user.secret_key_hash": "ab".repeat(32) };
         } },
       } as unknown as HandlerContext;
       const app = new Hono<Env>();
