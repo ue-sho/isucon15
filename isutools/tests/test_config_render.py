@@ -67,7 +67,7 @@ class RenderTests(unittest.TestCase):
         import shutil
         shutil.copytree(ROOT / 'isutools/templates', self.root / 'isutools/templates')
         values = read_env(ROOT / 'isutools/config.env')
-        values.update(HOSTS='s1 s2 s3', PPROTEIN_HOST='s3', APP_SERVICE='isuapp-node.service', S1_IP='10.0.0.1', S2_IP='10.0.0.2', S3_IP='10.0.0.3')
+        values.update(HOSTS='s1 s2 s3', PPROTEIN_HOST='s3', APP_SERVICE='isuapp-node.service', S1_IP='10.0.0.1', S2_IP='10.0.0.2', S3_IP='10.0.0.3', PROFILING_ENABLED='1')
         self.config = Config(self.root, values)
         self.config.values['SLOW_LOG'] = '/var/log/mysql/mysql-slow.log'
         for host in self.config.hosts:
@@ -75,6 +75,17 @@ class RenderTests(unittest.TestCase):
 
     def text(self, path):
         return (self.root / path).read_text()
+
+    def test_disabled_profiling_renders_no_access_sql_or_node_profiler(self):
+        self.config.values['PROFILING_ENABLED'] = '0'
+        render_all(self.config)
+        for host in self.config.hosts:
+            self.assertIn('access_log off;', self.text(f'{host}/etc/nginx/conf.d/isutools-log.conf'))
+            self.assertIn('slow_query_log=0', self.text(f'{host}/etc/mysql/conf.d/zz-isutools-slowlog.cnf'))
+            dropin = self.text(f'{host}/etc/systemd/system/isuapp-node.service.d/isutools.conf')
+            self.assertIn('PPROTEIN_ENABLED=0', dropin)
+            self.assertIn('NODE_OPTIONS=', dropin)
+            self.assertNotIn('--require', dropin)
 
     def test_render_initial_profiling_settings_for_each_host(self):
         render_all(self.config)
