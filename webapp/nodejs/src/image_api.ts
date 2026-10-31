@@ -73,11 +73,12 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
     const file = h.imageFiles?.reference(owner.image_file_generation, input.imageId, owner.owner_user_id, owner.created_at, owner.image_version, owner.media_type);
     const cached = file !== undefined && await h.imageFiles!.has(file);
 
-    // 命中時も所有者・削除・差し替えをDBで再確認し、byteaだけを取得しない。
+    // 命中時も所有者・削除・差し替えをDBで再確認し、画像本体だけを取得しない。
     // 削除状態はこのSQLで改めて確認し、署名検証前には画像本体を取得しない。
-    const object = await h.db.get<{ data: Uint8Array<ArrayBuffer>; media_type: string }>(
+    // 未命中時はbyteaのhex表現（元画像の2倍）を避け、base64で転送する。
+    const object = await h.db.get<{ data_base64: string | null; media_type: string }>(
       `
-   SELECT ${cached ? "NULL::bytea AS data" : "i.data"}, i.media_type
+   SELECT ${cached ? "NULL::text" : "encode(i.data, 'base64')"} AS data_base64, i.media_type
    FROM image_objects i JOIN users u ON u.id = i.owner_user_id AND u.status = 'active'
    WHERE i.id = $1 AND i.created_at = $2 AND u.id = $3 AND (
      u.profile_image_id = i.id
@@ -113,7 +114,9 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
     if (exp <= unix(Temporal.Now.instant())) {
       throw new APIError(403, "image_forbidden");
     }
-    if (file && (cached || await h.imageFiles!.put(file, object.data))) {
+    // cachedなら必ずfileがあり、下のredirect経路で返す。本体の復元は未命中時だけ。
+    const data = cached ? null : Buffer.from(object.data_base64!, "base64");
+    if (file && (cached || await h.imageFiles!.put(file, data!))) {
       if (exp <= unix(Temporal.Now.instant())) throw new APIError(403, "image_forbidden");
       c.header("Content-Type", object.media_type);
       c.header("X-Accel-Redirect", file.uri);
@@ -124,7 +127,7 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       }
       return c.body(null, 200);
     }
-    return blobResponse(c, 200, object.media_type, object.data);
+    return blobResponse(c, 200, object.media_type, data!);
   }
   return (c) => handle(c);
 }

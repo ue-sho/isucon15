@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Hono } from "hono";
 import pg from "pg";
+import jpeg from "jpeg-js";
 import { apiErrorHandler } from "../src/api_error.ts";
 import { DB } from "../src/db.ts";
 import { getImageHandler } from "../src/image_api.ts";
@@ -167,6 +168,41 @@ test("image API with PostgreSQL partitions", { skip: !port }, async (t) => {
     const files = new ImageFiles(join(directory, "region-a"), 0);
     const otherRegion = new ImageFiles(join(directory, "region-b"), 0);
     const original = Buffer.from([1, 2, 3]);
+    await t.test("base64転送でJPEG・PNG・全バイト値を直接応答・ファイル・fallbackへ復元", async () => {
+      const fixtures = [
+        { mediaType: "image/jpeg", data: jpeg.encode({ width: 2, height: 1, data: Buffer.from([255, 0, 0, 255, 0, 0, 255, 255]) }, 90).data },
+        { mediaType: "image/png", data: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64") },
+        // 多数のbase64改行と、0x00・非UTF-8を含む200KiBの合成データも検証する。
+        { mediaType: "image/png", data: Buffer.from(Array.from({ length: 200 * 1024 }, (_, i) => i & 255)) },
+        { mediaType: "image/png", data: Buffer.alloc(0) },
+      ];
+      const transferFiles = new ImageFiles(join(directory, "base64"), 0);
+      const full = new ImageFiles(join(directory, "base64-full"), Number.MAX_SAFE_INTEGER);
+      try {
+        for (const { mediaType, data } of fixtures) {
+          await admin.query("UPDATE image_objects SET data=$1, media_type=$2 WHERE id='valid'", [data, mediaType]);
+          const direct = await request(url("valid"));
+          assert.equal(direct.response.status, 200);
+          assert.equal(direct.response.headers.get("content-type"), mediaType);
+          assert.deepEqual(Buffer.from(await direct.response.arrayBuffer()), data);
+          const cold = await request(url("valid"), undefined, transferFiles);
+          assert.equal(cold.response.status, 200);
+          const uri = cold.response.headers.get("x-accel-redirect")!;
+          assert.ok(uri);
+          assert.deepEqual(await readFile(join(transferFiles.directory, uri.slice("/_isureal_images/".length))), data);
+          const warm = await request(url("valid"), undefined, transferFiles);
+          assert.equal(warm.response.status, 200);
+          assert.equal(warm.response.headers.get("x-accel-redirect"), uri);
+          assert.match(warm.calls[1].sql, /SELECT NULL::text AS data_base64/);
+          const fallback = await request(url("valid"), undefined, full);
+          assert.equal(fallback.response.status, 200);
+          assert.equal(fallback.response.headers.get("x-accel-redirect"), null);
+          assert.deepEqual(Buffer.from(await fallback.response.arrayBuffer()), data);
+        }
+      } finally {
+        await admin.query("UPDATE image_objects SET data=$1, media_type='image/jpeg' WHERE id='valid'", [original]);
+      }
+    });
     const cold = await request(url("valid"), undefined, files);
     assert.equal(cold.response.status, 200);
     const uri = cold.response.headers.get("x-accel-redirect")!;
@@ -175,7 +211,7 @@ test("image API with PostgreSQL partitions", { skip: !port }, async (t) => {
     assert.deepEqual(await readFile(join(files.directory, uri.slice("/_isureal_images/".length))), original);
     const warm = await request(url("valid"), undefined, new ImageFiles(files.directory, 0));
     assert.equal(warm.response.headers.get("x-accel-redirect"), uri);
-    assert.match(warm.calls[1].sql, /SELECT NULL::bytea AS data/);
+    assert.match(warm.calls[1].sql, /SELECT NULL::text AS data_base64/);
     const regionB = await request(url("valid"), undefined, otherRegion);
     assert.equal(regionB.response.headers.get("x-accel-redirect"), uri);
     assert.deepEqual(await readFile(join(otherRegion.directory, uri.slice("/_isureal_images/".length))), original);
@@ -217,7 +253,7 @@ test("image API with PostgreSQL partitions", { skip: !port }, async (t) => {
     const afterReset = await request(url("valid"), undefined, files);
     assert.equal(afterReset.response.status, 200);
     assert.equal(afterReset.response.headers.get("x-accel-redirect"), beforeReset);
-    assert.match(afterReset.calls[1].sql, /SELECT NULL::bytea AS data/);
+    assert.match(afterReset.calls[1].sql, /SELECT NULL::text AS data_base64/);
     assert.equal((await request(url("valid"), undefined, otherRegion)).response.headers.get("x-accel-redirect"), beforeReset);
     assert.deepEqual(await readFile(join(files.directory, afterReset.response.headers.get("x-accel-redirect")!.slice("/_isureal_images/".length))), original);
     await forbidden((await request(url("new-after-snapshot"), undefined, files)).response);
