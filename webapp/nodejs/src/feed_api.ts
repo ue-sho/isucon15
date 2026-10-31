@@ -77,24 +77,22 @@ export function getFeedHandler(h: HandlerContext): Handler<Env> {
       scores = await recommendationScores(h.db, viewer, candidates);
       candidates.sort((a, b) => scores.get(b.post.id)! - scores.get(a.post.id)!);
     }
-    let items: FeedItemResponse[] = [];
+    const items: FeedItemResponse[] = [];
+    let hasMore = false;
     for (const post of candidates) {
       const score = scores.get(post.post.id) ?? 0;
       if (ranked && input.beforeScore !== null && !rankedBefore(score, post.post, input.beforeScore, input.beforePostedAt!, input.beforeId)) {
         continue;
+      }
+      if (items.length === 50) {
+        hasMore = true;
+        break;
       }
       const item: FeedItemResponse = newPostResponse(post.post, post.author);
       if (ranked) {
         item.score = score;
       }
       items.push(item);
-      if (items.length === 51) {
-        break;
-      }
-    }
-    const hasMore = items.length > 50;
-    if (hasMore) {
-      items = items.slice(0, 50);
     }
     const response: GetFeedResponse = { items, hasMore };
     return jsonResponse(c, 200, response);

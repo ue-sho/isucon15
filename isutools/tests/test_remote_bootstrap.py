@@ -131,6 +131,25 @@ class RemoteDeployTests(Sandbox):
         for endpoint in ['httplog', 'slowlog']:
             self.assertIn(f'http://127.0.0.1:9000/api/{endpoint}/config', calls)
         self.assertLess(calls.index('systemctl restart pprotein.service'), calls.index('/api/slowlog/config'))
+        probe = next(line for line in calls.splitlines() if '/api/group/targets' in line)
+        self.assertIn('--retry-connrefused', probe)
+        self.assertIn('--retry-max-time 15', probe)
+        self.assertNotIn('POST', probe)
+        self.assertLess(calls.index('systemctl restart pprotein.service'), calls.index('/api/group/targets'))
+        self.assertLess(calls.index('/api/group/targets'), calls.index('/api/httplog/config'))
+
+    def test_pprotein_unavailable_stops_before_config_and_log_truncate(self):
+        with (self.work / 'isutools/config.env').open('a') as file:
+            file.write('PPROTEIN_HOST=s1\n')
+        write(self.hosts / 's1/enabled', 'nginx\nisuapp-node.service\npprotein.service\n')
+        (self.hosts / 's1/fail-curl').touch()
+        result = self.deploy(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('step=pprotein-health', result.stdout)
+        self.assertNotIn('/api/httplog/config', self.calls())
+        self.assertNotIn('truncate', self.calls())
+        self.assertEqual((self.logs / 'nginx/access.log').read_text(), 'access\n')
+        self.assertFalse((self.work / '.isutools/last-deploy').exists())
 
     def test_postgresql_log_permissions_are_preserved(self):
         with (self.work / 'isutools/config.env').open('a') as file:

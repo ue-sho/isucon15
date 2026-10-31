@@ -74,8 +74,9 @@ export function getRelationshipsHandler(h: HandlerContext): Handler<Env> {
       input.beforeUpdatedAt,
       input.beforeId,
     );
-    let items: RelationshipResponse[] = [];
-    for (const record of records) {
+    const hasMore = records.length > 50;
+    const items: RelationshipResponse[] = [];
+    for (const record of records.slice(0, 50)) {
       const user = userFromRow(record, "user");
       setImageKey(user);
       if (user.accountType !== "certified_public" && input.kind !== "friends") {
@@ -91,10 +92,6 @@ export function getRelationshipsHandler(h: HandlerContext): Handler<Env> {
         status,
         updatedAt: record.updated_at,
       });
-    }
-    const hasMore = items.length > 50;
-    if (hasMore) {
-      items = items.slice(0, 50);
     }
     const response: GetRelationshipsResponse = { items, hasMore };
     return jsonResponse(c, 200, response);

@@ -27,3 +27,12 @@ export function envOrDefault(key: string, defaultValue: string): string {
   }
   return defaultValue;
 }
+
+export function appPortFromEnv(): number {
+  const value = envOrDefault("ISUREAL_PORT", "8080");
+  const port = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("invalid application port");
+  }
+  return port;
+}
