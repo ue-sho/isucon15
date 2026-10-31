@@ -60,7 +60,18 @@ def remote_deploy(config, host):
             config.sudo('nginx', '-t')
         step = 'restart'
         config.sudo('systemctl', 'daemon-reload')
-        for service in [config.require('DB_SERVICE'), 'nginx', config.require('APP_SERVICE')]:
+        db_service = config.require('DB_SERVICE')
+        if enabled(db_service):
+            step = 'db-restart'
+            config.sudo('systemctl', 'restart', db_service)
+            step = 'db-health'
+            if config.run(['systemctl', 'is-active', db_service], capture=True, check=False).returncode:
+                config.sudo('journalctl', '-u', db_service, '-n', '20', '--no-pager', check=False)
+                raise ToolError(f'{db_service} が起動していません')
+        else:
+            print(f'▶ {db_service} はこのホストで無効です（再起動していません）')
+        step = 'restart'
+        for service in ['nginx', config.require('APP_SERVICE')]:
             if enabled(service):
                 config.sudo('systemctl', 'restart', service)
         step = 'app-health'
