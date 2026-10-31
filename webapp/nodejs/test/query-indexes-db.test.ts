@@ -53,25 +53,32 @@ test("検索索引の適用前後・結果一致・再接続・撤去 / 専用PG
   }
   await migration("up");
   await migration("up", "api-lookup");
+  // DOブロックを含む撤去migrationはpsqlで実行する。
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  await promisify(execFile)("psql", ["-X", "-h", "127.0.0.1", "-p", port!, "-U", "postgres", "-d", database, "-v", "ON_ERROR_STOP=1", "-f", new URL("../../sql/migrations/20261031-drop-redundant-post-index.up.sql", import.meta.url).pathname]);
+  assert.equal((await client.query("SELECT to_regclass('posts_active_author_window_idx') AS name")).rows[0].name, null);
   for (const [name, { sql, args }] of Object.entries(queries)) {
     assert.deepEqual((await client.query(sql, args)).rows, before.get(name));
     const plan = (await client.query(`EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) ${sql}`, args)).rows[0]["QUERY PLAN"][0];
     plans[name].after = plan;
-    const expectedIndex = { session: "login_sessions_active_token_idx", post: "posts_active_author_window_idx|posts_author_window_counts_idx", image: "posts_active_image_author_idx", counts: "posts_author_window_counts_idx", followers: "follows_followee_updated_idx" }[name];
+    const expectedIndex = { session: "login_sessions_active_token_idx", post: "posts_author_window_counts_idx", image: "posts_active_image_author_idx", counts: "posts_author_window_counts_idx", followers: "follows_followee_updated_idx" }[name];
     assert.match(JSON.stringify(plan), new RegExp(expectedIndex!));
   }
-  const lookup = await client.query("SELECT indexrelid::regclass::text AS name,indisvalid,indisready FROM pg_index WHERE indexrelid IN ('login_sessions_active_token_idx'::regclass,'posts_active_author_window_idx'::regclass,'posts_active_image_author_idx'::regclass,'posts_author_window_counts_idx'::regclass,'follows_followee_updated_idx'::regclass)");
-  assert.equal(lookup.rows.length, 5);
+  const lookup = await client.query("SELECT indexrelid::regclass::text AS name,indisvalid,indisready FROM pg_index WHERE indexrelid IN ('login_sessions_active_token_idx'::regclass,'posts_active_image_author_idx'::regclass,'posts_author_window_counts_idx'::regclass,'follows_followee_updated_idx'::regclass)");
+  assert.equal(lookup.rows.length, 4);
   assert.ok(lookup.rows.every((row) => row.indisvalid && row.indisready));
   const reconnect = new pg.Client({ ...connection, database });
   await reconnect.connect();
   try { assert.deepEqual((await reconnect.query(queries.post.sql, queries.post.args)).rows, before.get("post")); } finally { await reconnect.end(); }
   await client.query(await readFile(new URL("../../sql/003-initial-snapshot.sql", import.meta.url), "utf8"));
   await client.query(await readFile(new URL("../../sql/reset.sql", import.meta.url), "utf8"));
-  assert.equal((await client.query("SELECT count(*)::int AS n FROM pg_index WHERE indexrelid IN ('login_sessions_active_token_idx'::regclass,'posts_active_author_window_idx'::regclass,'posts_active_image_author_idx'::regclass,'posts_author_window_counts_idx'::regclass,'follows_followee_updated_idx'::regclass) AND indisvalid AND indisready")).rows[0].n, 5);
+  assert.equal((await client.query("SELECT count(*)::int AS n FROM pg_index WHERE indexrelid IN ('login_sessions_active_token_idx'::regclass,'posts_active_image_author_idx'::regclass,'posts_author_window_counts_idx'::regclass,'follows_followee_updated_idx'::regclass) AND indisvalid AND indisready")).rows[0].n, 4);
   assert.deepEqual((await client.query(queries.post.sql, queries.post.args)).rows, before.get("post"));
   assert.equal((await client.query(queries.session.sql, queries.session.args)).rows.length, 0);
   await client.query("INSERT INTO login_sessions(id,user_id,token_hash) VALUES(md5('session-1'),md5('2'),md5('token-1'))");
+  await migration("down", "drop-redundant-post-index");
+  assert.deepEqual((await client.query(queries.post.sql, queries.post.args)).rows, before.get("post"));
   await migration("down", "api-lookup");
   await migration("down");
   assert.equal((await client.query("SELECT to_regclass('posts_active_author_window_idx') AS name")).rows[0].name, null);
