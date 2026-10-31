@@ -17,6 +17,8 @@ SELECT greatest(
   (SELECT max(created_at) FROM notifications)
 ) AS created_at, gen_random_uuid()::text AS image_cache_generation;
 
+ANALYZE initial_data_boundary;
+
 CREATE TABLE initial_users AS SELECT * FROM users;
 CREATE TABLE initial_friend_requests AS SELECT * FROM friend_requests;
 CREATE TABLE initial_friendships AS SELECT * FROM friendships;
