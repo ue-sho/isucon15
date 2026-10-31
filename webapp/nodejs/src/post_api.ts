@@ -7,6 +7,7 @@ import { signedImageURL } from "./image_signature.ts";
 import { decodeJPEG } from "./jpeg.ts";
 import { getPostPermissions, postColumns, postFromRow, getPost, getPostWithAuthor, selectPostsWithAuthor, validLocation, type Post, type PostLocation } from "./post.ts";
 import { getPostingWindow } from "./posting_window.ts";
+import { createPostTransaction } from "./post_transaction.ts";
 import { jsonResponse, noContent } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
 import { getSession } from "./session.ts";
@@ -86,6 +87,10 @@ export function createPostHandler(h: HandlerContext): Handler<Env> {
     }
 
     const userID = getSession(c)!.userID;
+    if (h.postTransaction) {
+      const { post, user } = await createPostTransaction(h.db, userID, imageData, input.caption, input.visibility, location);
+      return jsonResponse(c, 201, newPostResponse(post, user));
+    }
     await using tx = await h.db.begin();
     const userRow = must(await tx.get<Row>(`SELECT ${userColumns.join(", ")} FROM users WHERE id = $1 AND status = 'active' FOR NO KEY UPDATE`, userID));
     const user = userFromRow(userRow);
