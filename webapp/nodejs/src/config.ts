@@ -6,6 +6,7 @@ export type Config = {
   dbPassword: string;
   dbName: string;
   logLevel: string;
+  imageCacheDir?: string;
 };
 
 export function configFromEnv(): Config {
@@ -17,6 +18,7 @@ export function configFromEnv(): Config {
     dbPassword: envOrDefault("ISUREAL_DB_PASSWORD", "isureal"),
     dbName: envOrDefault("ISUREAL_DB_NAME", "isureal"),
     logLevel: envOrDefault("ISUREAL_LOG_LEVEL", "debug"),
+    imageCacheDir: envOrDefault("ISUREAL_IMAGE_CACHE_DIR", "") || undefined,
   };
 }
 

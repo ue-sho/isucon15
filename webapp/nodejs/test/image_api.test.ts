@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { Hono } from "hono";
 import pg from "pg";
@@ -7,6 +10,8 @@ import { apiErrorHandler } from "../src/api_error.ts";
 import { DB } from "../src/db.ts";
 import { getImageHandler } from "../src/image_api.ts";
 import { imageSignature } from "../src/image_signature.ts";
+import { ImageFiles } from "../src/image_files.ts";
+import { imageNginx } from "./helpers/image-nginx.ts";
 import type { Env, HandlerContext } from "../src/server.ts";
 
 // Explicit opt-in: use a fresh disposable PostgreSQL on localhost, never the contest DB.
@@ -58,7 +63,7 @@ test("image API with PostgreSQL partitions", { skip: !port }, async (t) => {
   function url(id: string, expires = exp, key = Buffer.from("ab".repeat(32), "hex")) {
     return `/api/images/${id}?exp=${expires}&sig=${imageSignature(key,id,expires).toString("base64url")}`;
   }
-  async function request(path: string, afterOwner?: () => Promise<unknown>) {
+  async function request(path: string, afterOwner?: () => Promise<unknown>, imageFiles?: ImageFiles) {
     const calls: { sql: string; args: unknown[] }[] = [];
     const wrapped = { async get<T>(sql: string, ...args: unknown[]) {
       calls.push({ sql, args });
@@ -67,7 +72,7 @@ test("image API with PostgreSQL partitions", { skip: !port }, async (t) => {
       return row;
     } } as DB;
     const app = new Hono<Env>().onError(apiErrorHandler);
-    app.get("/api/images/:imageId", getImageHandler({ db: wrapped } as HandlerContext));
+    app.get("/api/images/:imageId", getImageHandler({ db: wrapped, imageFiles } as HandlerContext));
     return { response: await app.request(path), calls };
   }
   async function forbidden(response: Response) {
@@ -150,5 +155,103 @@ test("image API with PostgreSQL partitions", { skip: !port }, async (t) => {
     assert.ok(nodes.some(n => n["Index Name"] === "users_pkey" && n.Alias === "u"));
     assert.ok(!nodes.some(n => n["Node Type"] === "Seq Scan" && n.Alias === "u"));
     assert.equal(nodes.filter(n => n["Relation Name"]?.startsWith("image_objects_") && n["Actual Loops"] > 0).length, 1);
+  });
+
+  await t.test("ファイル配信のcold/warm・失効・版変更・全地域の初期化", async (t) => {
+    await admin.query(await readFile(new URL("../../sql/003-initial-snapshot.sql", import.meta.url), "utf8"));
+    const migration = await readFile(new URL("../../sql/migrations/20261031-image-file-generation.up.sql", import.meta.url), "utf8");
+    await admin.query(migration);
+    await admin.query(migration);
+    const directory = await mkdtemp(join(tmpdir(), "isu15-image-api-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const files = new ImageFiles(join(directory, "region-a"), 0);
+    const otherRegion = new ImageFiles(join(directory, "region-b"), 0);
+    const original = Buffer.from([1, 2, 3]);
+    const cold = await request(url("valid"), undefined, files);
+    assert.equal(cold.response.status, 200);
+    const uri = cold.response.headers.get("x-accel-redirect")!;
+    assert.match(uri, /^\/_isureal_images\/[a-f0-9]{2}\/[a-f0-9]{64}\.jpg$/);
+    assert.equal((await cold.response.arrayBuffer()).byteLength, 0);
+    assert.deepEqual(await readFile(join(files.directory, uri.slice("/_isureal_images/".length))), original);
+    const warm = await request(url("valid"), undefined, new ImageFiles(files.directory, 0));
+    assert.equal(warm.response.headers.get("x-accel-redirect"), uri);
+    assert.match(warm.calls[1].sql, /SELECT NULL::bytea AS data/);
+    const regionB = await request(url("valid"), undefined, otherRegion);
+    assert.equal(regionB.response.headers.get("x-accel-redirect"), uri);
+    assert.deepEqual(await readFile(join(otherRegion.directory, uri.slice("/_isureal_images/".length))), original);
+
+    for (const [id, change, restore] of races) {
+      try {
+        assert.equal((await request(url(id), undefined, files)).response.status, 200);
+        await forbidden((await request(url(id), () => admin.query(change), files)).response);
+      } finally { await admin.query(restore); }
+    }
+    await forbidden((await request(url("valid", exp, Buffer.alloc(32)), undefined, files)).response);
+    await forbidden((await request(url("valid", 1), undefined, files)).response);
+    await t.test("書き出し中に期限が過ぎたらredirectを返さない", async (t) => {
+      let calls = 0;
+      t.mock.method(Temporal.Now, "instant", () => Temporal.Instant.fromEpochMilliseconds((++calls < 3 ? exp-1 : exp+1)*1000));
+      const result = await request(url("post-image"), undefined, files);
+      await forbidden(result.response);
+      assert.equal(result.response.headers.get("x-accel-redirect"), null);
+    });
+    try {
+      const result = await request(url("valid"), () => admin.query("UPDATE image_objects SET data=$1 WHERE id='valid'", [Buffer.from([9, 8])]), files);
+      await forbidden(result.response);
+      const changed = await request(url("valid"), undefined, files);
+      assert.notEqual(changed.response.headers.get("x-accel-redirect"), uri);
+    } finally { await admin.query("UPDATE image_objects SET data=$1 WHERE id='valid'", [original]); }
+    const fallback = await request(url("valid"), undefined, new ImageFiles(join(directory, "full"), Number.MAX_SAFE_INTEGER));
+    assert.equal(fallback.response.status, 200);
+    assert.equal(fallback.response.headers.get("x-accel-redirect"), null);
+    assert.deepEqual(Buffer.from(await fallback.response.arrayBuffer()), original);
+
+    const created = (await admin.query("INSERT INTO image_objects(id,owner_user_id,data,media_type) VALUES('new-after-snapshot','other',$1,'image/png') RETURNING created_at::text", [Buffer.from([4, 5])])).rows[0].created_at;
+    await admin.query("UPDATE users SET profile_image_id='new-after-snapshot' WHERE id='other'");
+    const newURI = (await request(url("new-after-snapshot"), undefined, files)).response.headers.get("x-accel-redirect");
+    assert.ok(newURI?.endsWith(".png"));
+    const beforeReset = (await request(url("valid"), undefined, files)).response.headers.get("x-accel-redirect");
+    const started = performance.now();
+    await admin.query(await readFile(new URL("../../sql/reset.sql", import.meta.url), "utf8"));
+    assert.ok(performance.now() - started < 60000, "synthetic reset must finish within 60 seconds");
+    const afterReset = await request(url("valid"), undefined, files);
+    assert.equal(afterReset.response.status, 200);
+    assert.notEqual(afterReset.response.headers.get("x-accel-redirect"), beforeReset);
+    assert.notEqual((await request(url("valid"), undefined, otherRegion)).response.headers.get("x-accel-redirect"), beforeReset);
+    assert.deepEqual(await readFile(join(files.directory, afterReset.response.headers.get("x-accel-redirect")!.slice("/_isureal_images/".length))), original);
+    await forbidden((await request(url("new-after-snapshot"), undefined, files)).response);
+    // 同じIDと作成日時を再利用しても、旧ファイルの内容を使わない。
+    await admin.query("INSERT INTO image_objects(id,owner_user_id,data,media_type,created_at) VALUES('new-after-snapshot','other',$1,'image/png',$2)", [Buffer.from([8, 9]), created]);
+    await admin.query("UPDATE users SET profile_image_id='new-after-snapshot' WHERE id='other'");
+    const reused = await request(url("new-after-snapshot"), undefined, files);
+    assert.notEqual(reused.response.headers.get("x-accel-redirect"), newURI);
+    assert.deepEqual(await readFile(join(files.directory, reused.response.headers.get("x-accel-redirect")!.slice("/_isureal_images/".length))), Buffer.from([8, 9]));
+
+    if (process.env.IMAGE_FILE_NGINX_TEST === "1") {
+      const nginx = await imageNginx(db, files);
+      try {
+        const response = await nginx.request(url("valid"));
+        assert.equal(response.status, 200);
+        assert.equal(response.headers["content-type"], "image/jpeg");
+        assert.ok(String(response.headers["cache-control"]).includes("no-store"));
+        assert.equal(response.headers["x-accel-redirect"], undefined);
+        assert.deepEqual(response.body, original);
+        const png = await nginx.request(url("new-after-snapshot"));
+        assert.equal(png.headers["content-type"], "image/png");
+        assert.deepEqual(png.body, Buffer.from([8, 9]));
+        const internalURI = afterReset.response.headers.get("x-accel-redirect")!;
+        assert.equal((await nginx.request(internalURI)).status, 404);
+        assert.equal((await nginx.request("/_isureal_images/../etc/passwd")).status, 404);
+        const ranged = await nginx.request(url("valid"), { Range: "bytes=0-0", "If-Modified-Since": "Fri, 01 Jan 2100 00:00:00 GMT" });
+        assert.equal(ranged.status, 200);
+        assert.deepEqual(ranged.body, original);
+        assert.equal((await nginx.request(url("valid", exp, Buffer.alloc(32)))).status, 403);
+        assert.equal((await nginx.request(url("valid", 1))).status, 403);
+        try {
+          await admin.query("UPDATE posts SET deleted_at=clock_timestamp() WHERE id='p-valid'");
+          assert.equal((await nginx.request(url("valid"))).status, 403);
+        } finally { await admin.query("UPDATE posts SET deleted_at=NULL WHERE id='p-valid'"); }
+      } finally { await nginx.close(); }
+    }
   });
 });

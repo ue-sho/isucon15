@@ -2,6 +2,9 @@ SET session_replication_role = replica;
 
 BEGIN;
 
+-- DB更新と同じCOMMITで全地域・全workerの画像ファイルを論理無効化する。
+UPDATE initial_data_boundary SET image_cache_generation = gen_random_uuid()::text;
+
 TRUNCATE ip_bans, login_sessions, administrator_sessions, friendships, friend_requests, follows, block_relations;
 
 DELETE FROM notifications WHERE created_at > (SELECT created_at FROM initial_data_boundary);
