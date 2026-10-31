@@ -3,6 +3,8 @@
 調査日: 2026-10-31（JST）。対象: ISUCON2026、本リポジトリ名は `isucon15`。
 担当・進捗は [Issue #2](https://github.com/ue-sho/isucon15/issues/2)。ueshoが環境作業中のため、この作業では調査・ドキュメントを先行する。
 
+後続の運営回答：[Clarifications保存](clarifications-2026-10-31.md)。#20で条件付きの地域間API転送を許可、#26でS3禁止、#32で初期化60秒以内、#39で署名・期限の形式と検証結果の維持および許容範囲内での有効期限変更を確認。以下は初動時点の調査記録。
+
 ## 根拠と調査範囲
 
 - [当日マニュアル保存版](manual-2026-10-31.md): ユーザー提供の全文をそのまま保存。ブラウザ上の原文は [運営のmanual.md](https://gist.github.com/whywaita/17f3ab1a8c1b7585c571f4f8afe5f531)（表示されたrevision: `84abc2b3b01411cdc6e4433c118a0677500e6634`）。原文とのバイト一致までは未確認。

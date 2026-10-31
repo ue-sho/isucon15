@@ -1,5 +1,19 @@
 # Node.jsのpprotein収集確認
 
+## 再起動直後の設定登録に失敗する場合（2026-10-31）
+
+`14edb12`の全ホストデプロイで、asia2だけ `pprotein-config` のcurl exit 7（127.0.0.1:9000接続拒否）が報告された。
+直後の読み取りではpproteinはactive・Result=success・NRestarts=0、`GET /api/group/targets`は200。
+systemdの再起動完了とHTTP待受開始の間の競合と整合するため、設定POST前に同GETを上限付きで再試行する処理を追加した。
+curlは1回最大2秒・connect timeout 1秒・1秒間隔・最大10回retry・retry開始可能期間15秒とし、接続拒否もretryする。
+設定POST自体を再試行する変更ではない。失敗時は `pprotein-health` で止まり、設定POST・ログtruncate・成功記録へ進まない。
+
+RemoteDeployテスト46件成功。再起動→GET起動待ち→設定POSTの順序と、起動待ち失敗時にログ・成功記録を維持することを確認した。
+本番はasia2だけをロックし、起動済みpproteinへalp/slpの設定登録だけを再実行、GETのYAML構造がリポジトリの2ファイルと一致することを確認して復旧した。
+APIはコメント等を正規化して返すため、バイト一致ではなくYAML構造で比較する。
+この復旧ではサービス/DB再起動・ログtruncate・初期化・ベンチは行っていない。
+失敗したデプロイの残り全工程を再実行したものではなく、asia2のlast-deploy成功記録は更新していない。次の通常デプロイから起動待ち修正を使う。
+
 2026-10-31に実環境を確認。設定変更・サービス再起動・初期化・ベンチ実行は行っていない。
 
 - asia1 / europe1 / america1の`isureal-nodejs.service`はすべてactive。
