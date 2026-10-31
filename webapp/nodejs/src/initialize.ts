@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import type { Handler } from "hono";
 import { triggerPproteinCollect } from "./pprotein.ts";
 import { jsonResponse } from "./response.ts";
+import { backfillUserSearch } from "./user_search.ts";
 import type { Env, HandlerContext } from "./server.ts";
 
 function runInitScript(): Promise<void> {
@@ -22,9 +23,12 @@ function runInitScript(): Promise<void> {
   });
 }
 
-export function initializeHandler(_: HandlerContext): Handler<Env> {
+export function initializeHandler(h: HandlerContext): Handler<Env> {
   return async (c) => {
     triggerPproteinCollect();
+    // Also covers fresh initial snapshots and writes made by the previous app
+    // during rollout. reset.sql copies these values explicitly in replica mode.
+    await backfillUserSearch(h.db);
     await runInitScript();
 
     // Set language to the implementation language.

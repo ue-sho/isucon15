@@ -1,7 +1,6 @@
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
-import { getBlockedUserIDs } from "./post.ts";
 import { isBlocked, isFriend } from "./relationship.ts";
 import type { RelationshipUserResponse } from "./relationship_list_api.ts";
 import { jsonResponse } from "./response.ts";
@@ -9,6 +8,7 @@ import type { Env, HandlerContext } from "./server.ts";
 import { getSession } from "./session.ts";
 import { getUser, setImageKey, userColumns, userFromRow, validUserText, type User } from "./user.ts";
 import { newGetMeResponse } from "./user_api.ts";
+import { normalizeSearchText } from "./user_search.ts";
 
 const searchUsersRequest = {
   q: { query: "q" },
@@ -21,10 +21,6 @@ type SearchUsersResponse = {
   hasMore: boolean;
 };
 
-function normalizeSearchText(value: string): string {
-  return value.normalize("NFC").toUpperCase().toLowerCase().normalize("NFC");
-}
-
 export function searchUsersHandler(h: HandlerContext): Handler<Env> {
   return async (c) => {
     const input = await bind(c, searchUsersRequest);
@@ -35,36 +31,41 @@ export function searchUsersHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(400, "invalid_pagination");
     }
     const viewer = getSession(c)!.userID;
+    const query = normalizeSearchText(input.q);
+    // PostgreSQL text cannot contain NUL. The original JS substring search
+    // therefore never matched it, but sending it as a text parameter would fail.
+    if (query.includes("\0")) {
+      return jsonResponse(c, 200, { items: [], hasMore: false });
+    }
     const rows = await h.db.select(
-      `SELECT ${userColumns.join(", ")} FROM users WHERE status='active' AND id<>$1 AND ($2='' OR (username,id)>($2,$3)) ORDER BY username, id`,
+      `SELECT ${userColumns.map((column) => `u.${column}`).join(", ")}
+       FROM users u
+       WHERE u.status='active' AND u.id<>$1
+         AND ($2='' OR (u.username,u.id)>($2,$3))
+         AND (strpos(u.search_username COLLATE "C", $4) > 0
+           OR strpos(u.search_display_name COLLATE "C", $4) > 0)
+         AND NOT EXISTS (
+           SELECT 1 FROM block_relations b
+           WHERE (b.blocker_id=$1 AND b.blocked_id=u.id)
+              OR (b.blocker_id=u.id AND b.blocked_id=$1)
+         )
+       ORDER BY u.username, u.id LIMIT 51`,
       viewer,
       input.beforeUsername,
       input.beforeId,
+      query,
     );
-    const blocked = await getBlockedUserIDs(h.db, viewer);
-    const query = normalizeSearchText(input.q);
-    let items: RelationshipUserResponse[] = [];
-    for (const row of rows) {
+    const items: RelationshipUserResponse[] = [];
+    // The 51st row only establishes hasMore; never derive its key or sign it.
+    for (const row of rows.slice(0, 50)) {
       const user = userFromRow(row);
-      if (!normalizeSearchText(user.username).includes(query) && !normalizeSearchText(user.displayName).includes(query)) {
-        continue;
-      }
-      if (blocked.has(user.id)) {
-        continue;
-      }
       setImageKey(user);
       if (user.accountType !== "certified_public") {
         user.bio = "";
       }
       items.push(newRelationshipUserResponse(user));
-      if (items.length === 51) {
-        break;
-      }
     }
-    const hasMore = items.length > 50;
-    if (hasMore) {
-      items = items.slice(0, 50);
-    }
+    const hasMore = rows.length > 50;
     const response: SearchUsersResponse = { items, hasMore };
     return jsonResponse(c, 200, response);
   };

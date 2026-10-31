@@ -5,6 +5,7 @@ import { bind } from "./bind.ts";
 import type { Row } from "./db.ts";
 import { lockNotificationMembership } from "./notification_membership.ts";
 import { signedImageURL } from "./image_signature.ts";
+import { normalizeSearchText } from "./user_search.ts";
 import { jsonResponse, noContent } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
 import { createLoginSessionForLockedUserTx, getSession, invalidateLoginSession, sha256Hex } from "./session.ts";
@@ -75,8 +76,8 @@ export function registerHandler(h: HandlerContext): Handler<Env> {
     // 別SQLにして、ロック待機後の新しいスナップショットで重複を確認する。
     await tx.exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, input.username);
     const row = await tx.get<Row>(
-      `INSERT INTO users (id, username, secret_key_hash, display_name, region)
-       SELECT $1::varchar(36), $2::varchar(64), $3::text, $4::text, $5::text
+      `INSERT INTO users (id, username, secret_key_hash, display_name, region, search_username, search_display_name)
+       SELECT $1::varchar(36), $2::varchar(64), $3::text, $4::text, $5::text, $6::text, $7::text
        WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = $2::varchar(64))
        RETURNING ${userColumns.join(", ")}`,
       userID,
@@ -84,6 +85,8 @@ export function registerHandler(h: HandlerContext): Handler<Env> {
       sha256Hex(secretKey),
       input.displayName,
       input.region,
+      normalizeSearchText(input.username),
+      normalizeSearchText(input.displayName),
     );
     if (!row) {
       throw new APIError(409, "username_taken");
@@ -164,9 +167,11 @@ export function updateMeHandler(h: HandlerContext): Handler<Env> {
     if (input.region !== null) await lockNotificationMembership(tx);
     const row = await tx.get(
       `UPDATE users SET display_name = COALESCE($2, display_name), bio = COALESCE($3, bio),
+                        search_display_name = COALESCE($5, search_display_name),
                         region = COALESCE($4, region), updated_at = clock_timestamp()
        WHERE id = $1 AND status = 'active' RETURNING ${userColumns.join(", ")}`,
       session.userID, input.displayName, input.bio, input.region,
+      input.displayName === null ? null : normalizeSearchText(input.displayName),
     );
     if (!row) {
       throw new APIError(404, "account_not_found");

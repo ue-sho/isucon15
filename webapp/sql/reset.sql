@@ -38,11 +38,14 @@ DELETE FROM users WHERE created_at > (SELECT created_at FROM initial_data_bounda
 
 UPDATE users u
 SET display_name = i.display_name, bio = i.bio, profile_image_id = i.profile_image_id, region = i.region,
+    search_username = i.search_username, search_display_name = i.search_display_name,
     account_type = i.account_type, status = i.status, deleted_at = i.deleted_at, updated_at = i.updated_at
 FROM initial_users i
 WHERE u.id = i.id
-  AND (u.display_name, u.bio, u.profile_image_id, u.region, u.account_type, u.status, u.deleted_at, u.updated_at)
-      IS DISTINCT FROM (i.display_name, i.bio, i.profile_image_id, i.region, i.account_type, i.status, i.deleted_at, i.updated_at);
+  AND (u.display_name, u.bio, u.profile_image_id, u.region, u.account_type, u.status, u.deleted_at, u.updated_at,
+       u.search_username, u.search_display_name)
+      IS DISTINCT FROM (i.display_name, i.bio, i.profile_image_id, i.region, i.account_type, i.status, i.deleted_at, i.updated_at,
+                        i.search_username, i.search_display_name);
 
 INSERT INTO friend_requests (id, requester_id, recipient_id, status, created_at, updated_at)
 SELECT id, requester_id, recipient_id, status, created_at, updated_at FROM initial_friend_requests;
