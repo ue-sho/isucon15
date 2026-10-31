@@ -232,7 +232,7 @@ test("actual image handler still checks signature, expiry, owner and validity on
         }
         validityReads++;
         if (expireDuringRead) time.wall = exp * 1000;
-        return active && valid ? { data: new Uint8Array([1, 2, 3]), media_type: "image/jpeg" } : undefined;
+        return active && valid ? { data_base64: Buffer.from([1, 2, 3]).toString("base64"), media_type: "image/jpeg" } : undefined;
       },
     },
   } as unknown as HandlerContext;
