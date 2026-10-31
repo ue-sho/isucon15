@@ -134,6 +134,48 @@ test("認証・権限・RETURNING / 新規ローカルPostgreSQL", { skip: !port
     assert.equal((await request("/me", session.token)).status, 200);
   });
 
+  await t.test("不正な秘密鍵はユーザー行ロックを待たず、正常ログインは退会commit後に再判定する", async () => {
+    await control.query("BEGIN");
+    let pending: Promise<Response> | undefined;
+    try {
+      await control.query("SELECT id FROM users WHERE username='viewer' FOR NO KEY UPDATE");
+      // 旧SQLでは秘密鍵を判定する前に、同じ行のロックで待たされる。
+      await using baseline = await realDB.begin();
+      await baseline.exec("SET LOCAL lock_timeout = '100ms'");
+      const baselineStarted = performance.now();
+      await assert.rejects(
+        baseline.get("SELECT id FROM users WHERE username = $1 FOR NO KEY UPDATE", "viewer"),
+        (error: unknown) => (error as { code?: string }).code === "55P03",
+      );
+      t.diagnostic(`old lookup: lock timeout after ${Math.round(performance.now() - baselineStarted)}ms`);
+      await baseline.rollback();
+      const started = performance.now();
+      const invalid = await request("/login", "", "POST", { username: "viewer", secretKey: "invalid" });
+      assert.equal(invalid.status, 401);
+      assert.deepEqual(await invalid.json(), { error: "invalid_credentials" });
+      t.diagnostic(`row locked: invalid login ${Math.round(performance.now() - started)}ms`);
+      pending = Promise.resolve(request("/login", "", "POST", { username: "viewer", secretKey: secrets.get("viewer") }));
+      let waiting = false;
+      for (let i = 0; i < 100; i++) {
+        const result = await control.query(`SELECT 1 FROM pg_stat_activity
+          WHERE datname = current_database() AND pid <> pg_backend_pid()
+            AND pg_backend_pid() = ANY(pg_blocking_pids(pid)) LIMIT 1`);
+        if (result.rowCount) { waiting = true; break; }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.ok(waiting, "correct credentials must still wait for the user lock");
+      await control.query("UPDATE users SET status='deleted' WHERE username='viewer'");
+      await control.query("COMMIT");
+      const response = await pending;
+      assert.equal(response.status, 401);
+      assert.deepEqual(await response.json(), { error: "invalid_credentials" });
+    } finally {
+      await control.query("ROLLBACK");
+      if (pending) await pending;
+      await control.query("UPDATE users SET status='active' WHERE username='viewer'");
+    }
+  });
+
   const ids = new Map<string, string>();
   for (const name of ["viewer", "author", "bridge"]) ids.set(name, (await control.query("SELECT id FROM users WHERE username=$1", [name])).rows[0].id);
   await control.query(`INSERT INTO posting_windows(id,region,local_date,starts_at,on_time_deadline) VALUES
