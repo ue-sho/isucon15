@@ -165,7 +165,7 @@ http {{
                                     self.assertEqual(payload['authorization'], 'Bearer fixture')
                                     self.assertEqual(payload['client_ip'], '203.0.113.7')
                                     self.assertEqual(payload['country'], 'GB' if region == 'europe' else 'US')
-                            updates = [('/api/friend-requests', 'POST')]
+                            updates = [('/api/friend-requests', 'POST'), ('/api/auth/login', 'POST')]
                             updates += [(f'/api/friend-requests/request%2Did/{action}', 'POST') for action in ['accept', 'reject', 'cancel']]
                             updates += [('/api/friendships/user%2Did', 'DELETE')]
                             updates += [(f'/api/{kind}/user%2Did', method) for kind in ['follows', 'blocks'] for method in ['PUT', 'DELETE']]
@@ -205,6 +205,8 @@ http {{
                                 ('/api/friend-requests/', 'POST'), ('/api/friend-requests/id/unknown', 'POST'),
                                 ('/api/friend-requests/id/accept/extra', 'POST'), ('/api/friendships/id/', 'DELETE'),
                                 ('/api/follows/id/extra', 'PUT'), ('/api/blocks/', 'DELETE'),
+                                ('/api/auth/login/', 'POST'), ('/api/auth/login/extra', 'POST'),
+                                ('/api/auth/register', 'POST'), ('/api/auth/logout', 'POST'),
                             ]:
                                 with request(path, method) as response:
                                     self.assertEqual(json.load(response)['backend'], 'local')

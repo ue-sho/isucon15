@@ -204,6 +204,55 @@ test("関係更新の地域転送 / 実nginx・認証・隔離PostgreSQL 16", {
     }
   }
 
+  for (const region of ["europe", "america"] as const) {
+    await t.test(`${region}: ログイン転送・旧token失効・他プロセスの即時認証・logout`, async () => {
+      const actor = await user(region);
+      const credentials = { username: actor.id, secretKey: "fixture-secret" };
+      await control.query("UPDATE users SET secret_key_hash=$2 WHERE id=$1", [actor.id, sha256Hex(credentials.secretKey)]);
+      const login = (url = edges.get(region)!) => request(actor, "/api/auth/login", "POST", credentials, url);
+      const me = (token: string, url = local.get(region)!.url) => request(actor, "/api/me", "GET", undefined, url, { Authorization: `Bearer ${token}` });
+      const previous = await expect(login(local.get(region)!.url), 200);
+      const current = await expect(login(), 200);
+      assert.deepEqual(current.user, previous.user);
+      assert.equal((await me(previous.token)).status, 401);
+      assert.equal((await me(current.token)).status, 200);
+      assert.equal((await me(previous.token, local.get("asia")!.url)).status, 401);
+      assert.equal((await me(current.token, local.get("asia")!.url)).status, 403);
+      await expect(request(actor, "/api/auth/login", "POST", { ...credentials, secretKey: "wrong" }), 401, "invalid_credentials");
+      assert.equal((await me(current.token)).status, 200);
+      const concurrent = await Promise.all([expect(login(), 200), expect(login(local.get(region)!.url), 200)]);
+      const states = await Promise.all(concurrent.map(async r => (await me(r.token)).status));
+      assert.deepEqual([...states].sort(), [200, 401]);
+      assert.equal((await control.query("SELECT count(*)::int AS n FROM login_sessions WHERE user_id=$1 AND active", [actor.id])).rows[0].n, 1);
+      const active = concurrent[states.indexOf(200)]!.token;
+      await expect(request(actor, "/api/auth/logout", "POST", undefined, undefined, { Authorization: `Bearer ${active}` }), 204);
+      assert.equal((await me(active, near.get(region)!.url)).status, 401);
+      await control.query("UPDATE users SET status='deleted' WHERE id=$1", [actor.id]);
+      await expect(login(), 401, "invalid_credentials");
+      // login自体には地域制限がない既存仕様も維持する。
+      const foreign = await user("asia");
+      await control.query("UPDATE users SET secret_key_hash=$2 WHERE id=$1", [foreign.id, sha256Hex(credentials.secretKey)]);
+      const foreignLogin = await expect(request(actor, "/api/auth/login", "POST", { ...credentials, username: foreign.id }), 200);
+      assert.equal(foreignLogin.user.region, "asia");
+      await control.query("INSERT INTO ip_bans(ip,banned_until) VALUES('203.0.113.99',clock_timestamp()+interval '1 minute') ON CONFLICT(ip) DO UPDATE SET banned_until=EXCLUDED.banned_until");
+      await pause(220); // 既存のIPBanListは200ms周期で更新する。
+      await expect(request(actor, "/api/auth/login", "POST", credentials, undefined, { "X-Client-IP": "203.0.113.99" }), 403, "ip_banned");
+    });
+  }
+  for (const deleteFirst of [false, true]) {
+    await t.test(`ログインと退会: ${deleteFirst ? "退会" : "ログイン"}が先にロック`, async () => {
+      const actor = await user("europe");
+      const credentials = { username: actor.id, secretKey: "race-secret" };
+      await control.query("UPDATE users SET secret_key_hash=$2 WHERE id=$1", [actor.id, sha256Hex(credentials.secretKey)]);
+      const login = () => request(actor, "/api/auth/login", "POST", credentials);
+      const remove = () => request(actor, "/api/me/account-deletion", "POST");
+      const replies = await race(deleteFirst ? local.get("europe")!.db : near.get("europe")!.db, actor.id,
+        deleteFirst ? remove : login, deleteFirst ? login : remove);
+      assert.deepEqual(replies.map(r => r.status), deleteFirst ? [204, 401] : [200, 204]);
+      assert.equal((await control.query("SELECT count(*)::int AS n FROM login_sessions WHERE user_id=$1 AND active", [actor.id])).rows[0].n, 0);
+    });
+  }
+
   await t.test("同向き申請: 転送先と旧地域プロセスが競合してもpendingは1件", async () => {
     const a = await user("europe"), b = await user("america");
     const replies = await race(near.get("europe")!.db, b.id, () => send(a, b), () => send(a, b, local.get("europe")!.url));
