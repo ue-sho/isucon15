@@ -129,11 +129,8 @@ export function getRealMojisHandler(h: HandlerContext): Handler<Env> {
       input.beforeCreatedAt,
       input.beforeId,
     );
-    let items = reactions.map((reaction) => newRealMojiResponse(reaction.realMoji, reaction.reactor));
-    const hasMore = items.length > 50;
-    if (hasMore) {
-      items = items.slice(0, 50);
-    }
+    const hasMore = reactions.length > 50;
+    const items = reactions.slice(0, 50).map((reaction) => newRealMojiResponse(reaction.realMoji, reaction.reactor));
     const response: GetRealMojisResponse = { items, hasMore };
     return jsonResponse(c, 200, response);
   };

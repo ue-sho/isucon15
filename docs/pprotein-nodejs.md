@@ -1,5 +1,17 @@
 # Node.jsのpprotein収集確認
 
+## 現在の構成（2026-10-31）
+
+Node.js＋nginxのアプリサーバーはasia1・europe1・america1、共有PostgreSQL 16はasia2という構成。
+pprotein本体もasia2にあり、各サーバーのpprotein-agentからログ、アプリ3台のNode.jsからCPUプロファイルを収集する。
+DBのSQLがasia2に集中する構成は、他3台のslowlogが収集期間中に空だった観測とも整合する。
+空ログだけから各ホストのPostgreSQL停止や収集障害を判断しない。各ホストのDB接続先の環境変数値はこの確認では表示・照合していない。
+
+SQLログの収集・保存と解析の成功は分けて確認する。解析の修正経緯は以下の「PostgreSQLの解析モード対応」「PostgreSQLログ形式による取りこぼしとTSV崩れの修正」に記録する。
+以下の作業記録にある「未実施」「現在」はそれぞれの確認時点の状態を表す。
+
+## 初回の収集確認
+
 2026-10-31に実環境を確認。設定変更・サービス再起動・初期化・ベンチ実行は行っていない。
 
 - asia1 / europe1 / america1の`isureal-nodejs.service`はすべてactive。
