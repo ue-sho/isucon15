@@ -1,0 +1,74 @@
+[
+  {
+    "Type": "httplog",
+    "Label": "asia1-httplog",
+    "URL": "http://192.168.1.10:19000/debug/log/httplog",
+    "Duration": 70
+  },
+  {
+    "Type": "slowlog",
+    "Label": "asia1-slowlog",
+    "URL": "http://192.168.1.10:19000/debug/log/slowlog",
+    "Duration": 70
+  },
+  {
+    "Type": "pprof",
+    "Label": "asia1-pprof",
+    "URL": "http://192.168.1.10:6060/debug/pprof/profile",
+    "Duration": 60
+  },
+  {
+    "Type": "httplog",
+    "Label": "europe1-httplog",
+    "URL": "http://192.168.2.10:19000/debug/log/httplog",
+    "Duration": 70
+  },
+  {
+    "Type": "slowlog",
+    "Label": "europe1-slowlog",
+    "URL": "http://192.168.2.10:19000/debug/log/slowlog",
+    "Duration": 70
+  },
+  {
+    "Type": "pprof",
+    "Label": "europe1-pprof",
+    "URL": "http://192.168.2.10:6060/debug/pprof/profile",
+    "Duration": 60
+  },
+  {
+    "Type": "httplog",
+    "Label": "america1-httplog",
+    "URL": "http://192.168.3.10:19000/debug/log/httplog",
+    "Duration": 70
+  },
+  {
+    "Type": "slowlog",
+    "Label": "america1-slowlog",
+    "URL": "http://192.168.3.10:19000/debug/log/slowlog",
+    "Duration": 70
+  },
+  {
+    "Type": "pprof",
+    "Label": "america1-pprof",
+    "URL": "http://192.168.3.10:6060/debug/pprof/profile",
+    "Duration": 60
+  },
+  {
+    "Type": "httplog",
+    "Label": "asia2-httplog",
+    "URL": "http://192.168.4.10:19000/debug/log/httplog",
+    "Duration": 70
+  },
+  {
+    "Type": "slowlog",
+    "Label": "asia2-slowlog",
+    "URL": "http://192.168.4.10:19000/debug/log/slowlog",
+    "Duration": 70
+  },
+  {
+    "Type": "pprof",
+    "Label": "asia2-pprof",
+    "URL": "http://192.168.4.10:6060/debug/pprof/profile",
+    "Duration": 60
+  }
+]
