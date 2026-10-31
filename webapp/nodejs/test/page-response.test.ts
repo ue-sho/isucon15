@@ -41,7 +41,8 @@ function setup(kind: Kind, count: number, filtered = false) {
     },
     select: async (sql: string, ...args: unknown[]) => {
       queries.push({ sql, args });
-      if (sql.includes("FROM block_relations")) return [];
+      // public候補SQL内のNOT EXISTSは、ブロック一覧の取得とは区別する。
+      if (sql.includes("FROM block_relations") && !sql.includes("FROM posts p")) return [];
       if (sql.includes("FROM friendships") && !sql.includes("FROM (")) {
         if (kind !== "ranked") return [];
         return [{ user_low_id: "friend", user_high_id: args[0] === "viewer" ? "viewer" : "author" }];
