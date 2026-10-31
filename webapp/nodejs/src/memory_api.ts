@@ -115,9 +115,10 @@ async function loadMemoryInteractions(db: Queryer, items: MemoryPostResponse[]):
   }
   const postIDs = items.map((item) => item.id);
   const itemByPostID = new Map(items.map((item) => [item.id, item]));
-  const placeholders = postIDs.map((_, i) => `$${i + 1}`).join(", ");
-
-  const reactions = await selectCurrentRealMojis(db, `AND r.post_id IN (${placeholders}) ORDER BY r.created_at DESC, r.id DESC`, ...postIDs);
+  const reactions = await selectCurrentRealMojis(
+    memoryPostQueryer(db, postIDs, "DESC"),
+    `AND r.post_id = ANY($1::varchar[])`,
+  );
   for (const reaction of reactions) {
     const item = itemByPostID.get(reaction.realMoji.postID)!;
     if (item.realmojis.length < 50) {
@@ -125,11 +126,40 @@ async function loadMemoryInteractions(db: Queryer, items: MemoryPostResponse[]):
     }
   }
 
-  const comments = await selectCommentsWithAuthor(db, `AND c.post_id IN (${placeholders}) ORDER BY c.created_at, c.id`, ...postIDs);
+  const comments = await selectCommentsWithAuthor(
+    memoryPostQueryer(db, postIDs, "ASC"),
+    `AND c.post_id = ANY($1::varchar[])`,
+  );
   for (const comment of comments) {
     const item = itemByPostID.get(comment.comment.postID)!;
     if (item.comments.length < 50) {
       item.comments.push(newCommentResponse(comment.comment, comment.author));
     }
   }
+}
+
+// Reuse the shared selectors' filters and row mapping. Rank only eligible rows
+// after active/deleted/replaced filtering, with one SQL per interaction type.
+function memoryPostQueryer(db: Queryer, postIDs: string[], direction: "ASC" | "DESC"): Queryer {
+  return {
+    get<T>(sql: string, ...args: unknown[]): Promise<T | undefined> {
+      return db.get<T>(sql, ...args);
+    },
+    exec(sql: string, ...args: unknown[]): Promise<number> {
+      return db.exec(sql, ...args);
+    },
+    select<T>(sql: string): Promise<T[]> {
+      return db.select<T>(`
+        SELECT ranked.* FROM (
+          SELECT interaction.*, row_number() OVER (
+            PARTITION BY interaction.post_id
+            ORDER BY interaction.created_at ${direction}, interaction.id ${direction}
+          ) AS memory_rank
+          FROM (${sql}) AS interaction
+        ) AS ranked
+        WHERE ranked.memory_rank <= 50
+        ORDER BY ranked.post_id, ranked.created_at ${direction}, ranked.id ${direction}
+      `, postIDs);
+    },
+  };
 }
