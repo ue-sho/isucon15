@@ -170,7 +170,7 @@ test("image API with PostgreSQL partitions", { skip: !port }, async (t) => {
     const cold = await request(url("valid"), undefined, files);
     assert.equal(cold.response.status, 200);
     const uri = cold.response.headers.get("x-accel-redirect")!;
-    assert.match(uri, /^\/_isureal_images\/[a-f0-9]{2}\/[a-f0-9]{64}\.jpg$/);
+    assert.match(uri, /^\/_isureal_images\/initial\/[a-f0-9]{2}\/[a-f0-9]{64}\.jpg$/);
     assert.equal((await cold.response.arrayBuffer()).byteLength, 0);
     assert.deepEqual(await readFile(join(files.directory, uri.slice("/_isureal_images/".length))), original);
     const warm = await request(url("valid"), undefined, new ImageFiles(files.directory, 0));
@@ -216,8 +216,9 @@ test("image API with PostgreSQL partitions", { skip: !port }, async (t) => {
     assert.ok(performance.now() - started < 60000, "synthetic reset must finish within 60 seconds");
     const afterReset = await request(url("valid"), undefined, files);
     assert.equal(afterReset.response.status, 200);
-    assert.notEqual(afterReset.response.headers.get("x-accel-redirect"), beforeReset);
-    assert.notEqual((await request(url("valid"), undefined, otherRegion)).response.headers.get("x-accel-redirect"), beforeReset);
+    assert.equal(afterReset.response.headers.get("x-accel-redirect"), beforeReset);
+    assert.match(afterReset.calls[1].sql, /SELECT NULL::bytea AS data/);
+    assert.equal((await request(url("valid"), undefined, otherRegion)).response.headers.get("x-accel-redirect"), beforeReset);
     assert.deepEqual(await readFile(join(files.directory, afterReset.response.headers.get("x-accel-redirect")!.slice("/_isureal_images/".length))), original);
     await forbidden((await request(url("new-after-snapshot"), undefined, files)).response);
     // 同じIDと作成日時を再利用しても、旧ファイルの内容を使わない。

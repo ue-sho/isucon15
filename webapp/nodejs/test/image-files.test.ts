@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, stat, symlink } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { ImageFiles } from "../src/image_files.ts";
@@ -14,13 +14,13 @@ test("画像ファイルの原子的な公開・再起動後の再利用・版�
   t.after(() => rm(root, { recursive: true, force: true }));
   const files = new ImageFiles(join(root, "images"), 0);
   const reference = files.reference(generation, "../../id?exp=1", "owner", stamp, "123", "image/jpeg")!;
-  assert.match(reference.uri, /^\/_isureal_images\/[a-f0-9]{2}\/[a-f0-9]{64}\.jpg$/);
+  assert.match(reference.uri, /^\/_isureal_images\/runtime\/[0-9a-f-]{36}\/[a-f0-9]{2}\/[a-f0-9]{64}\.jpg$/);
   assert.equal(await files.has(reference), false);
   assert.deepEqual(await Promise.all(Array.from({ length: 8 }, () => files.put(reference, body))), Array(8).fill(true));
   assert.equal(await files.has(reference), true);
   assert.deepEqual(await readFile(reference.path), body);
   assert.equal((await stat(reference.path)).mode & 0o777, 0o644);
-  assert.equal((await readdir(join(files.directory, reference.uri.split("/")[2]))).length, 1);
+  assert.equal((await readdir(dirname(reference.path))).length, 1);
   assert.equal(await new ImageFiles(files.directory).has(reference), true);
   for (const ref of [
     files.reference("22222222-2222-4222-8222-222222222222", "../../id?exp=1", "owner", stamp, "123", "image/jpeg")!,

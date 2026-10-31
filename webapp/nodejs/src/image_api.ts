@@ -4,6 +4,7 @@ import { APIError } from "./api_error.ts";
 import { bind, parseQuery, rawQuery } from "./bind.ts";
 import { imageSignature, imageSigningKey } from "./image_signature.ts";
 import { blobResponse } from "./response.ts";
+import { imageFileGenerationSQL } from "./image_files.ts";
 import { unix } from "./time.ts";
 import type { Env, HandlerContext } from "./server.ts";
 
@@ -40,10 +41,10 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
 
-    const owner = await h.db.get<{ secret_key_hash: string; owner_user_id: string; created_at: Temporal.Instant; image_version: string; image_cache_generation: string; media_type: string }>(
+    const owner = await h.db.get<{ secret_key_hash: string; owner_user_id: string; created_at: Temporal.Instant; image_version: string; image_cache_generation: string; image_file_generation: string; media_type: string }>(
       `
    SELECT u.secret_key_hash, i.owner_user_id, i.created_at
-   ${h.imageFiles ? ", i.xmin::text AS image_version, b.image_cache_generation, i.media_type" : ""}
+   ${h.imageFiles ? ` , i.xmin::text AS image_version, b.image_cache_generation, i.media_type, ${imageFileGenerationSQL} AS image_file_generation` : ""}
    FROM image_objects i JOIN users u ON u.id = i.owner_user_id
    ${h.imageFiles ? "CROSS JOIN initial_data_boundary b" : ""}
    WHERE i.id = $1 AND u.status = 'active'
@@ -59,7 +60,7 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
 
-    const file = h.imageFiles?.reference(owner.image_cache_generation, input.imageId, owner.owner_user_id, owner.created_at, owner.image_version, owner.media_type);
+    const file = h.imageFiles?.reference(owner.image_file_generation, input.imageId, owner.owner_user_id, owner.created_at, owner.image_version, owner.media_type);
     const cached = file !== undefined && await h.imageFiles!.has(file);
 
     // 命中時も所有者・削除・差し替えをDBで再確認し、byteaだけを取得しない。

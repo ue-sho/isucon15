@@ -1,14 +1,14 @@
 # 画像ファイルのnginx配信（Issue #37）
 
-画像本体の永続保存先は引き続きasia2のPostgreSQL `image_objects.data`。各アプリサーバーは最初の画像取得時にローカルへ書き出し、Node.jsが検証した後、`X-Accel-Redirect`でnginxから配信する。初期画像の一括書き出しは行わない。アップロードやエクスポートの保存形式も変えない。
+画像本体の永続保存先は引き続きasia2のPostgreSQL `image_objects.data`。各アプリサーバーは最初の画像取得時にローカルへ書き出し、Node.jsが検証した後、`X-Accel-Redirect`でnginxから配信する。初期画像を含めた全画像の一括書き出しコマンドも提供する。アップロードやエクスポートの保存形式も変えない。
 
 ## 配信と整合性
 
 - `ISUREAL_IMAGE_CACHE_DIR`が空なら従来のDB本文配信。3台のメインアプリのsystemd drop-inでは `/var/cache/isureal/images` を指定する。追加の地域別APIサービスでは有効にしない。
-- ファイルは `/<先頭2桁>/<SHA-256>.jpg` または `.png`。キーにDB共通の世代、画像ID、所有者、作成日時、画像行のxmin、MIMEを含める。一時ファイルを同期してからrenameし、不完全なファイルを公開しない。
+- ファイルは `initial/<先頭2桁>/<SHA-256>.jpg` または `runtime/<世代>/<先頭2桁>/<SHA-256>.jpg`（PNGは `.png`）。初期化時はinitialフォルダをコピーせず、そのまま再利用する。キーに画像の世代、画像ID、所有者、作成日時、画像行のxmin、MIMEを含める。初期画像の世代は初期データ境界の日時から算出し、追加画像はDB共通の世代を使う。一時ファイルを同期してからrenameし、不完全なファイルを公開しない。
 - 署名・期限の形式と検証を維持する。毎回DBで所有者の有効状態、プロフィール・投稿・RealMojiの参照、削除・差し替えを確認する。ファイル命中時だけ画像本体のbytea取得を省く。書き出し後にも期限を確認する。
 - nginxの `/_isureal_images/` は `internal`。クライアントから直接取得できない。`Cache-Control: no-store` を維持し、Range・条件付き更新によって既存の200応答を変えない。
-- `reset.sql`は初期化トランザクション内で `initial_data_boundary.image_cache_generation` を更新する。各リクエストでこの値を取得し、全地域・全workerの過去ファイルを論理的に無効化する。初期化後に画像IDが再利用されても古いファイルを使わない。
+- `reset.sql`は初期化トランザクション内で `initial_data_boundary.image_cache_generation` を更新する。各リクエストでこの値を取得し、全地域・全workerの追加画像の過去ファイルを論理的に無効化する。初期画像のファイルは再利用する。初期化後に画像IDが再利用されても古いファイルを使わない。
 - DBを永続データの正として維持するため、各地域で直ちに最新の状態を検証できる。systemdの `CacheDirectory` は再起動後も残るが、ファイルが失われてもDBから再作成する。
 - 空き容量が512MiB未満になる書き出し、または書き込み失敗時はDB本文にフォールバックする。JPEG/PNG以外もDB本文を返す。
 
@@ -32,3 +32,17 @@
 - 3地域のnginx設定を使う既存proxy試験も成功。画像ファイル単体試験は同時書き出しとシンボリックリンクの拒否を確認。
 
 DB/nginx統合試験は空の専用DBに限り、`IMAGE_SQL_TEST_PORT=<port> IMAGE_FILE_NGINX_TEST=1 node --test test/image_api.test.ts` で実行する。nginx用Dockerを使うのはローカル試験のみ。本番規模の初期化時間・ディスク使用量・得点改善は未確認。
+
+## 全画像の事前書き出し
+
+`src/export_image_files.ts` は初期画像を含む全画像を、画像APIと同じキーで書き出す。初期画像はinitialize後も再利用できる。initialize中には書き出しを行わず、初期化の同期処理に画像I/Oを追加しない。実際の画像取得時の署名・期限・削除検証は維持する。
+
+反映後、ベンチも初期化も動いていない時間に、各アプリホストで以下を実行する（SSH先をasia1、europe1、america1に変更して順番に実行）。アプリの再起動は不要。一括書き出しは全画像をDBから読むため、ベンチ中には実行しない。
+
+```sh
+ssh asia1 'sudo systemd-run --wait --pipe --collect --unit=isureal-image-export --property=User=isucon --property=Group=isucon --property=WorkingDirectory=/home/isucon/webapp/nodejs --property=EnvironmentFile=/home/isucon/env.sh --setenv=ISUREAL_IMAGE_CACHE_DIR=/var/cache/isureal/images /home/isucon/local/node/bin/node src/export_image_files.ts'
+```
+
+単一のREAD ONLY REPEATABLE READトランザクションのcursorで4画像ずつ取得する。書き出し済みのファイルはスキップし、written/existing/unsupported/bytesを集計する。JPEG/PNG以外は従来のDB本文配信であり、unsupportedとして数える。容量不足・書き込み失敗は成功扱いにせず停止する。途中でinitializeにより世代が変わった場合も失敗にし、終了後の再実行を促す。DB変更は行わず、再実行可能。
+
+追加確認: PostgreSQLで一括書き出し、再実行、初期化後の初期画像再利用、容量不足、初期化競合を検証。実nginxを含む画像API30件も成功し、reset後の初期画像取得がbyteaを取得しないことと、追加画像ID再利用時の無効化を確認した。本番の全件所要時間・ディスク使用量は未計測。
