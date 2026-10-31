@@ -3,8 +3,7 @@ import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
 import { must } from "./db.ts";
-import { getFriendIDs } from "./post.ts";
-import { beginRelationshipTx, getFriendRequest, insertFriendship, isBlocked } from "./relationship.ts";
+import { beginRelationshipTx, friendRequestFromRow, getFriendRequest, insertFriendship, isBlocked, isFriend } from "./relationship.ts";
 import { jsonResponse } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
 import { getSession } from "./session.ts";
@@ -28,41 +27,35 @@ export function createFriendRequestHandler(h: HandlerContext): Handler<Env> {
     if (blocked) {
       throw new APIError(409, "relationship_conflict");
     }
-    const friends = await getFriendIDs(tx, actor);
-    for (const id of friends) {
-      if (id === input.recipientId) {
-        throw new APIError(409, "relationship_conflict");
-      }
+    if (await isFriend(tx, actor, input.recipientId)) {
+      throw new APIError(409, "relationship_conflict");
     }
-    const existing = await tx.get<{ id: string }>(
+    const existing = await tx.get(
       `
-   SELECT id FROM friend_requests WHERE status='pending' AND
+   SELECT id, requester_id, recipient_id, status, created_at, updated_at FROM friend_requests WHERE status='pending' AND
     ((requester_id=$1 AND recipient_id=$2) OR (requester_id=$2 AND recipient_id=$1))
   `,
       actor,
       input.recipientId,
     );
-    let requestID: string;
+    let result: { id: string; status: string; updated_at: Temporal.Instant };
     if (existing) {
-      const request = must(await getFriendRequest(tx, existing.id));
+      const request = friendRequestFromRow(existing);
       if (request.requesterID === actor) {
         throw new APIError(409, "relationship_conflict");
       }
-      await tx.exec(`UPDATE friend_requests SET status='accepted', updated_at=clock_timestamp() WHERE id=$1`, request.id);
+      result = must(await tx.get(`UPDATE friend_requests SET status='accepted', updated_at=clock_timestamp() WHERE id=$1 RETURNING id, status, updated_at`, request.id));
       await insertFriendship(tx, request);
-      requestID = request.id;
     } else {
-      requestID = randomUUID();
-      await tx.exec(
-        `INSERT INTO friend_requests (id, requester_id, recipient_id, status, created_at, updated_at) VALUES ($1,$2,$3,'pending',clock_timestamp(),clock_timestamp())`,
-        requestID,
+      result = must(await tx.get(
+        `INSERT INTO friend_requests (id, requester_id, recipient_id, status, created_at, updated_at) VALUES ($1,$2,$3,'pending',clock_timestamp(),clock_timestamp()) RETURNING id, status, updated_at`,
+        randomUUID(),
         actor,
         input.recipientId,
-      );
+      ));
     }
-    const request = must(await getFriendRequest(tx, requestID));
     await tx.commit();
-    const response: FriendRequestResponse = { relationId: request.id, status: request.status, updatedAt: request.updatedAt };
+    const response: FriendRequestResponse = { relationId: result.id, status: result.status, updatedAt: result.updated_at };
     return jsonResponse(c, 201, response);
   };
 }
@@ -109,10 +102,11 @@ export function transitionFriendRequestHandler(h: HandlerContext): Handler<Env> 
       }
       await insertFriendship(tx, request);
     }
-    await tx.exec(`UPDATE friend_requests SET status=$2, updated_at=clock_timestamp() WHERE id=$1`, request.id, status);
-    request = must(await getFriendRequest(tx, request.id));
+    const result = must(await tx.get<{ id: string; status: string; updated_at: Temporal.Instant }>(
+      `UPDATE friend_requests SET status=$2, updated_at=clock_timestamp() WHERE id=$1 RETURNING id, status, updated_at`, request.id, status,
+    ));
     await tx.commit();
-    const response: FriendRequestResponse = { relationId: request.id, status: request.status, updatedAt: request.updatedAt };
+    const response: FriendRequestResponse = { relationId: result.id, status: result.status, updatedAt: result.updated_at };
     return jsonResponse(c, 200, response);
   };
 }

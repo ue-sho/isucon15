@@ -12,7 +12,7 @@ export type FriendRequest = {
   updatedAt: Temporal.Instant;
 };
 
-function friendRequestFromRow(row: Row): FriendRequest {
+export function friendRequestFromRow(row: Row): FriendRequest {
   return {
     id: row.id,
     requesterID: row.requester_id,
@@ -34,6 +34,15 @@ export function minID(a: string, b: string): string {
 
 export function maxID(a: string, b: string): string {
   return a < b ? b : a;
+}
+
+export async function isFriend(db: Queryer, actor: string, target: string): Promise<boolean> {
+  const row = must(await db.get<{ exists: boolean }>(
+    `SELECT EXISTS(SELECT 1 FROM friendships WHERE user_low_id=$1 AND user_high_id=$2)`,
+    minID(actor, target),
+    maxID(actor, target),
+  ));
+  return row.exists;
 }
 
 export async function beginRelationshipTx(db: DB, actor: string, target: string): Promise<Tx> {
