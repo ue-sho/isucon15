@@ -2,8 +2,18 @@ SET session_replication_role = replica;
 
 BEGIN;
 
--- DB更新と同じCOMMITで全地域・全workerの画像ファイルを論理無効化する。
+-- Invalidate signature caches in every region at the same commit as the reset.
+-- Lock this singleton first so concurrent resets cannot publish out of order.
+DO $$
+BEGIN
+  UPDATE image_signature_cache_state SET generation = generation + 1 WHERE singleton;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'image signature cache generation is missing';
+  END IF;
+END $$;
+-- DB更新と同じCOMMITで追加画像のファイルを論理無効化する。
 UPDATE initial_data_boundary SET image_cache_generation = gen_random_uuid()::text;
+
 
 TRUNCATE ip_bans, login_sessions, administrator_sessions, friendships, friend_requests, follows, block_relations;
 

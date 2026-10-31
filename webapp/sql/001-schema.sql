@@ -1,4 +1,5 @@
 DROP TABLE IF EXISTS
+  image_signature_cache_state,
   ip_bans,
   notifications,
   comments,
@@ -17,6 +18,12 @@ DROP TABLE IF EXISTS
   administrators,
   users,
   image_objects;
+
+CREATE TABLE image_signature_cache_state (
+  singleton boolean PRIMARY KEY CHECK (singleton),
+  generation bigint NOT NULL CHECK (generation >= 1)
+);
+INSERT INTO image_signature_cache_state VALUES (true, 1);
 
 -- 2026-09-01: 画像をDBにおかないと、別のサーバーからデータを返却したときに404になってしまう。ファイル配置に変更して障害になってしまったので注意。ここは決して変更しないこと。
 CREATE TABLE image_objects (
