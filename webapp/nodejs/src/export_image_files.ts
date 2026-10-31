@@ -10,7 +10,7 @@ type Image = {
 };
 
 // 単一スナップショットのcursorを使い、画像全体をメモリへ載せない。
-export async function exportImageFiles(db: DB, files: ImageFiles) {
+export async function exportImageFiles(db: DB, files: ImageFiles, region?: string) {
   const result = { written: 0, existing: 0, unsupported: 0, bytes: 0 };
   await using tx = await db.begin();
   await tx.exec("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
@@ -19,7 +19,8 @@ export async function exportImageFiles(db: DB, files: ImageFiles) {
   await tx.exec(`DECLARE image_export NO SCROLL CURSOR FOR
     SELECT i.id, i.owner_user_id, i.created_at, i.xmin::text AS image_version, i.media_type, i.data,
       ${imageFileGenerationSQL} AS image_file_generation
-    FROM image_objects i CROSS JOIN initial_data_boundary b`);
+    FROM image_objects i CROSS JOIN initial_data_boundary b
+    ${region ? "JOIN users u ON u.id = i.owner_user_id WHERE u.region = $1" : ""}`, ...(region ? [region] : []));
   for (;;) {
     const rows = await tx.select<Image>("FETCH FORWARD 4096 FROM image_export");
     if (!rows.length) break;
@@ -53,6 +54,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!config.imageCacheDir) throw new Error("ISUREAL_IMAGE_CACHE_DIR is required");
   const db = new DB(config, 1);
   try {
-    console.log(JSON.stringify(await exportImageFiles(db, new ImageFiles(config.imageCacheDir))));
+    console.log(JSON.stringify(await exportImageFiles(db, new ImageFiles(config.imageCacheDir), process.argv.includes("--region") ? config.region : undefined)));
   } finally { await db.end(); }
 }

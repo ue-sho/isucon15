@@ -15,6 +15,8 @@ test("全画像の一括書き出し・再実行・世代変更・失敗後の�
   assert.equal((await db.get<{ count: number }>("SELECT count(*) FROM pg_tables WHERE schemaname='public'"))!.count, 0, "fresh disposable DB required");
   await db.exec("CREATE TABLE initial_data_boundary (image_cache_generation text, created_at timestamptz)");
   await db.exec("INSERT INTO initial_data_boundary VALUES (gen_random_uuid()::text, now() + interval '1 day')");
+  await db.exec("CREATE TABLE users (id text PRIMARY KEY, region text)");
+  await db.exec("INSERT INTO users VALUES ('owner', 'asia')");
   await db.exec("CREATE TABLE image_objects (id text, owner_user_id text, created_at timestamptz, media_type text, data bytea)");
   await db.exec(`INSERT INTO image_objects SELECT n::text, 'owner', now(), CASE WHEN n=1025 THEN 'image/gif' WHEN n%2=0 THEN 'image/png' ELSE 'image/jpeg' END, decode('010203','hex') FROM generate_series(1,1025) n`);
   const root = await mkdtemp(join(tmpdir(), "image-export-"));
@@ -28,6 +30,8 @@ test("全画像の一括書き出し・再実行・世代変更・失敗後の�
   assert.equal((await exportImageFiles(db, files)).existing, 1024);
   await assert.rejects(exportImageFiles(db, new ImageFiles(join(root, "full"), Number.MAX_SAFE_INTEGER)), /disk space/);
   assert.equal((await exportImageFiles(db, files)).existing, 1024);
+  assert.equal((await exportImageFiles(db, new ImageFiles(join(root, "europe"), 0), "europe")).written, 0);
+  assert.equal((await exportImageFiles(db, new ImageFiles(join(root, "asia"), 0), "asia")).written, 1024);
   class ResetDuringWrite extends ImageFiles {
     reset = false;
     override async putBatch(entries: Parameters<ImageFiles["putBatch"]>[0]) {
