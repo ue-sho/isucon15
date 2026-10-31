@@ -72,3 +72,63 @@ up.sqlを実行し、両候補が実計画で選ばれること、前後の結�
 これらは推定costでありmsではない。実行計画は本番でEXPLAINのみ取得し、ANALYZEや実データ集計は実行していない。
 原本は手元 `/tmp/isu15-query-indexes-before.json` と `/tmp/isu15-query-indexes-after.json`。
 本番DDLのみ反映済み。リポジトリではスキーマ・適用/撤去SQL・テストを同ブランチの差分として保持。アプリのデプロイ・再起動・初期化・追加ベンチは行っていない。
+
+## API全体の追加確認
+
+ユーザー提示のHTTP集計はlogin1023件、画像928件、friends feed216件、Memories205件、投稿枠109件、投稿100件など。
+成功/失敗の内訳を混ぜず、索引で改善できる検索をアプリ全体のSQLと照合した。
+画像の432件の4xxには署名等の拒否が含まれ得るため、すべてを画像有効性SQLの対象とは扱わない。
+
+追加する3本:
+
+| 索引 | 対象と根拠 |
+|---|---|
+| posts_active_image_author_idx: (image_id,author_id) WHERE deleted_at IS NULL | 署名確認後の投稿画像有効性。現在は作者の133推定投稿をBitmap取得してimage_idでfilter、generic cost506.45 |
+| posts_author_window_counts_idx: (author_id,posting_window_id) INCLUDE(deleted_at) | POST postsとGET posting-window/currentのactive/deleted件数集計。削除済み行が必須で先の部分索引は使えず、既存2索引のBitmapAnd、cost106.46 |
+| follows_followee_updated_idx: (followee_id,updated_at DESC,id DESC) INCLUDE(follower_id) | followers一覧の逆方向検索とLIMIT/ORDER。followsとusersのSeqScan+Sort、cost727.52 |
+
+投稿の2本のauthor/window索引はキーが重なるが、部分索引はactive行の権限/Memory用、完全なcovering索引は削除履歴込みの件数集計用。
+今回、適用済みの部分索引を削除せず、用途差を維持する。今後の実測で保守費用が上回る場合は統合を別変更で検討する。
+追加分の書込・WAL・容量費用は増える。PK/UNIQUEとSQLの結果・認可条件は変えない。
+追加適用/撤去は `20261031-api-lookup.up.sql` / `.down.sql`。先行2本の適用SQLとは分け、各ファイルをpsqlでトランザクション外に実行する。
+
+見送りと既存対応:
+
+- loginのusernameはusers_username_id_idx済み。有効token検索は先行追加済み。失効用user_idはsession表230推定行のため追加しない。
+- invalid profile-imageのJPEG処理は索引で改善できない。別Issue #16。
+- friends feedは公開中枠の投稿を全取得してアプリで選別する。SQLの絞込みとLIMITが先で、今回wideなcovering索引や並び順索引を追加しない（#19）。
+- ブロック254推定行/40kB、admin session、IPBanなど小表は追加しない。既存PK/UNIQUEを維持。
+- friendsは両方向索引、pending友達申請は双方向の部分索引済み。
+- comments/RealMoji一覧は既存索引で推定1行。今回は作成/置換時の索引保守費用を増やさない。
+- ユーザー検索は取得後にUnicode正規化・部分一致で選別する。単純なB-tree追加では解決しない。
+- image_objectsは既存の各partition PK先頭idを使える。画像有効性RealMojiの索引も既存。重複して追加しない。
+- SSEの集計時間は通知待機を含む。通知は既存(user_id,posting_window_id)を使い、時刻索引を追加しない。
+
+ローカルPG16テストを5索引へ拡張し成功。合成投稿20万/session2万/follows1万で全5索引の利用と前後結果一致、active1/deleted1の集計、再接続、snapshot/reset後の5索引valid/ready、全撤去後の結果一致を確認した。
+本番の追加前generic計画原本: `/tmp/isu15-index-audit2-before.json`。
+
+追加3本も本番適用済み。適用前にデプロイロックなし、対象posts/followsの他接続ロックなし、他の稼働処理は別対象FETCH1接続だけと確認。
+古いスナップショットがあるため `20261031-api-lookup.maintenance-up.sql` で通常作成した。対象表のSHAREロックをNOWAITで即時取得し、各文30秒制限・同一Txで3本作成とCOMMIT成功。元のFETCH接続も継続。
+追加分もCONCURRENTLY用up/downと、書込がない時間帯専用maintenance-upをリポジトリに残す。通常デプロイ時にDDLを自動実行する処理は追加しない。
+
+| 追加索引 | valid/ready | 容量 |
+|---|---|---|
+| posts_active_image_author_idx | true/true | 62 MB |
+| posts_author_window_counts_idx | true/true | 68 MB |
+| follows_followee_updated_idx | true/true | 1592 kB |
+
+| SQL | generic推定cost前→後 | 適用後の主な計画 |
+|---|---|---|
+| 投稿画像の有効性 | 506.45→8.46 | posts_active_image_author_idxのIndex Only Scan |
+| 投稿作成等のactive/deleted集計 | 106.46→46.19 | posts_author_window_counts_idxのIndex Only Scan |
+| followers一覧（LIMIT 51） | 727.52→223.14 | 新索引Index Only Scan＋users PK、Sortなし |
+
+これらは実行時間ではない。全3本で利用を確認したが、実負荷でのAPI時間・書込保守費用・WAL・ベンチスコアの前後比較は未確認。
+追加前後の計画原本: `/tmp/isu15-index-audit2-before.json` / `/tmp/isu15-index-audit2-after.json`。
+合成データのテストではsession0.978→0.011ms、投稿画像0.099→0.014ms、件数0.048→0.021ms、followers1.012→0.125msだったが、単発かつ分布が本番と異なるので採用効果の証明にはしない。
+
+## 現在の反映状態
+
+計5本は本番DBに反映済み。通常のデプロイ・サービス再起動は不要で、索引作成後は既存SQLの再計画で利用される。
+デプロイやresetは追加索引を削除しない。001-schema.sqlには新規DB用の定義を置き、適用/撤去SQLには既存DB用の手順を残す。
+アプリのデプロイ・再起動・本番初期化・ベンチは実行していない。
