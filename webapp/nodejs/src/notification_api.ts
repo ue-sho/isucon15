@@ -1,5 +1,6 @@
 import type { Handler } from "hono";
 import { must, type Queryer } from "./db.ts";
+import type { NotificationWakeup } from "./notification_wakeup.ts";
 import { logError, marshalJSON } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
 import { getSession, type Session } from "./session.ts";
@@ -37,9 +38,12 @@ class NotificationPoller {
   readonly subscribers = new Set<Subscriber>();
   timer: ReturnType<typeof setTimeout> | undefined;
   running = false;
+  wakePending = false;
+  readonly wakeup?: NotificationWakeup;
 
-  constructor(db: Queryer) {
+  constructor(db: Queryer, createWakeup?: (wake: () => void) => NotificationWakeup) {
     this.db = db;
+    this.wakeup = createWakeup?.(() => this.wake());
   }
 
   add(subscriber: Subscriber): void {
@@ -48,6 +52,7 @@ class NotificationPoller {
       return;
     }
     this.subscribers.add(subscriber);
+    this.wakeup?.start();
     subscriber.signal.addEventListener("abort", subscriber.onAbort, { once: true });
     this.schedule(0);
   }
@@ -56,10 +61,25 @@ class NotificationPoller {
     if (!this.subscribers.delete(subscriber)) return;
     subscriber.signal.removeEventListener("abort", subscriber.onAbort);
     try { subscriber.controller.close(); } catch {}
-    if (this.subscribers.size === 0 && this.timer !== undefined) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
+    if (this.subscribers.size === 0) {
+      this.wakeup?.stop();
+      this.wakePending = false;
+      if (this.timer !== undefined) {
+        clearTimeout(this.timer);
+        this.timer = undefined;
+      }
     }
+  }
+
+  wake(): void {
+    if (this.subscribers.size === 0) return;
+    if (this.running) {
+      this.wakePending = true;
+      return;
+    }
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    this.schedule(0);
   }
 
   schedule(delay: number): void {
@@ -72,6 +92,7 @@ class NotificationPoller {
 
   async poll(): Promise<void> {
     this.running = true;
+    this.wakePending = false;
     const startedAt = performance.now();
     const pending = [...this.subscribers];
     try {
@@ -126,13 +147,15 @@ class NotificationPoller {
     } finally {
       this.running = false;
       // 遅い照会中は次のpollを起動しない。完了後も待機を入れてbusy loopを防ぐ。
-      this.schedule(Math.max(1, notificationPollInterval - (performance.now() - startedAt)));
+      this.schedule(this.wakePending ? 1 : Math.max(1, notificationPollInterval - (performance.now() - startedAt)));
     }
   }
 }
 
-export function getNotificationsHandler(h: HandlerContext): Handler<Env> {
-  const poller = new NotificationPoller(h.db);
+export function getNotificationsHandler(h: HandlerContext,
+  createWakeup = (wake: () => void): NotificationWakeup => h.db.createNotificationWakeup(wake),
+): Handler<Env> {
+  const poller = new NotificationPoller(h.db, createWakeup);
   return async (c) => {
     const session = getSession(c)!;
     const { clock_timestamp: connectedAt } = must(await h.db.get<{ clock_timestamp: Temporal.Instant }>(`SELECT clock_timestamp()`));

@@ -2,6 +2,7 @@ import pg from "pg";
 import type { Config } from "./config.ts";
 import { parsePostgresTimestamp } from "./time.ts";
 import { logError } from "./response.ts";
+import { PoolNotificationWakeup } from "./notification_wakeup.ts";
 
 export type Row = Record<string, any>;
 
@@ -43,6 +44,8 @@ function statement(sql: string, args: unknown[]): pg.QueryConfig {
 
 export class DB implements Queryer {
   readonly #pool: pg.Pool;
+  readonly #notificationWakeup = new PoolNotificationWakeup();
+  #notificationPollerRegistered = false;
 
   constructor(config: Config, size: number) {
     this.#pool = new pg.Pool({
@@ -53,6 +56,7 @@ export class DB implements Queryer {
       database: config.dbName,
       max: size,
       types,
+      onConnect: (client) => this.#notificationWakeup.connect(client),
     });
     this.#pool.on("error", (err) => logError("database connection failed", err));
   }
@@ -88,7 +92,15 @@ export class DB implements Queryer {
   }
 
   async end(): Promise<void> {
+    this.#notificationWakeup.dispose();
     await this.#pool.end();
+  }
+
+  createNotificationWakeup(wake: () => void): PoolNotificationWakeup {
+    if (this.#notificationPollerRegistered) throw new Error("notification poller already registered");
+    this.#notificationPollerRegistered = true;
+    this.#notificationWakeup.wake = wake;
+    return this.#notificationWakeup;
   }
 }
 

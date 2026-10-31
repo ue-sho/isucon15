@@ -4,6 +4,7 @@ import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
 import { must } from "./db.ts";
 import { lockNotificationMembership } from "./notification_membership.ts";
+import { notificationChannel } from "./notification_wakeup.ts";
 import { getPostingWindow } from "./posting_window.ts";
 import { jsonResponse } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
@@ -61,8 +62,11 @@ export function openPostingWindowHandler(h: HandlerContext): Handler<Env> {
     );
     await tx.exec(
       `
-   INSERT INTO notifications (id, user_id, posting_window_id, created_at)
-   SELECT gen_random_uuid()::text, id, $2, $3 FROM users WHERE region = $1 AND status = 'active'
+   WITH inserted AS (
+     INSERT INTO notifications (id, user_id, posting_window_id, created_at)
+     SELECT gen_random_uuid()::text, id, $2, $3 FROM users WHERE region = $1 AND status = 'active'
+   )
+   SELECT pg_notify('${notificationChannel}', '')
   `,
       region,
       windowID,
