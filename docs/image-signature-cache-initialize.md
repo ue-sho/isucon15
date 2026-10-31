@@ -2,6 +2,22 @@
 
 2026-10-31、Issue #13 / PR #32の初期化残件を補完する。基点は `3a19a28`（#32マージ後）。有効期限の丸め・延長、署名アルゴリズム、キャッシュ容量・60秒TTLは変更しない。
 
+## 最新mainとの統合（2026-10-31）
+
+PR head `9c376f174c460b1cca3d3cb2f8c434d7235a4bdd` へ、#38まで取り込んだmain `ef058e726628cb17b7ffa68eb1868334f1e1aad6` をマージした。競合や手動の製品コード変更はなく、未投稿フィードの早期終了、通知一括照会、Node.js以外の実装整理をmainどおり保持した。署名キャッシュ・世代管理の意味変更はない。
+
+統合後に `npm run check` と、次の5ファイルを一度の `node --test` で実行し、**101成功・失敗0・skip0**を確認した。
+
+- `test/image-signature-cache.test.ts`
+- `test/image-signature-generation.test.ts`
+- `test/image_api.test.ts`
+- `test/feed-unposted.test.ts`
+- `test/page-response.test.ts`
+
+DB試験はDockerのPostgreSQL 16.13を使用し、127.0.0.1の動的ポートにだけ公開した新規コンテナ内に、空の専用DB `isureal_image_index_test` と `isureal_feed_unposted_test` を作成した。`IMAGE_SQL_TEST_PORT` と `FEED_UNPOSTED_TEST_PORT` はこのポートを指定した。世代試験は `IMAGE_SIGNATURE_GENERATION_TEST=1` で有効化し、試験自身が別の使い捨てPG16と6つの独立Nodeプロセスを起動した。今回作成したコンテナは試験終了後に破棄し、共有DB・サービスには接続していない。
+
+署名のhit/missと古い非同期リクエスト、世代更新・同時reset・rollback、画像の削除・退会・差し替え・期限・パーティション、全4種類の未投稿フィード、一覧の50件境界とカーソルを確認した。この統合版のデプロイ・本番initialize・ベンチはまだ実施していない。PR #40の画像ファイル化は今回のmainに含まれず、同PRと合わせる場合は双方の世代管理を保持した別の統合確認が必要になる。
+
 ## 12:50 JSTのデプロイ失敗と復旧版
 
 ユーザーがup SQLを実行してCOMMITまで成功し、共有DBの読み取りでも `singleton=true / generation=1` を確認した。**migrationは適用済みで、再実行不要。**
