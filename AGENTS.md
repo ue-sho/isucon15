@@ -31,7 +31,7 @@ ISUCON15で、仕様を満たしながらWebアプリケーションのチュー
 
 ## pproteinの計測データ
 
-pprotein本体は `isutools/config.env` の **`PPROTEIN_HOST`**（初期値は `s3`）で動作し、取得データは **`/var/lib/pprotein/data/`** に保存されます。
+pprotein本体は `isutools/config.env` の **`PPROTEIN_HOST`**（`asia2`）で動作し、取得データは **`/var/lib/pprotein/data/`** に保存されます。
 systemdの作業ディレクトリは `/var/lib/pprotein` です。`localhost:9000` はSSH転送先のUIであり、手元の保存先ではありません。
 
 | ファイル | 内容 |
