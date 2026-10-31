@@ -99,15 +99,12 @@ async function listMemories(
     beforeAt,
     beforeID,
   );
-  let items: MemoryPostResponse[] = posts.map((post) => ({
+  const hasMore = posts.length > 50;
+  const items: MemoryPostResponse[] = posts.slice(0, 50).map((post) => ({
     ...newPostResponse(post.post, post.author),
     realmojis: [],
     comments: [],
   }));
-  const hasMore = items.length > 50;
-  if (hasMore) {
-    items = items.slice(0, 50);
-  }
   await loadMemoryInteractions(db, items);
   return { items, hasMore };
 }

@@ -85,11 +85,8 @@ export function getCommentsHandler(h: HandlerContext): Handler<Env> {
       input.afterCreatedAt,
       input.afterId,
     );
-    let items = comments.map((comment) => newCommentResponse(comment.comment, comment.author));
-    const hasMore = items.length > 50;
-    if (hasMore) {
-      items = items.slice(0, 50);
-    }
+    const hasMore = comments.length > 50;
+    const items = comments.slice(0, 50).map((comment) => newCommentResponse(comment.comment, comment.author));
     const response: GetCommentsResponse = { items, hasMore };
     return jsonResponse(c, 200, response);
   };
