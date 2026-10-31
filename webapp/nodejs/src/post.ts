@@ -109,7 +109,7 @@ export type ViewerContext = {
   blocked: Set<string>;
 };
 
-export async function loadViewerContext(db: Queryer, viewerID: string, authenticatedUser?: User, options: { requirePostedToday?: boolean } = {}): Promise<ViewerContext | undefined> {
+export async function loadViewerContext(db: Queryer, viewerID: string, authenticatedUser?: User, options: { requirePostedToday?: boolean; publicFeed?: boolean } = {}): Promise<ViewerContext | undefined> {
   const user = authenticatedUser?.id === viewerID ? authenticatedUser : await getUser(db, viewerID);
   if (!user) {
     return undefined;
@@ -133,6 +133,8 @@ export async function loadViewerContext(db: Queryer, viewerID: string, authentic
   if (options.requirePostedToday && !viewer.hasPostedToday) {
     return undefined;
   }
+  // public feedは候補SQLで双方向blockを判定し、友達関係を使用しない。
+  if (options.publicFeed) return viewer;
   viewer.blocked = await getBlockedUserIDs(db, viewer.user.id);
   const friends = await getFriendIDs(db, viewer.user.id);
   if (friends.length === 0) {
