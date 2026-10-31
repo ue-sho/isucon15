@@ -87,6 +87,14 @@ def remote_deploy(config, host):
         for service in ['pprotein-agent.service', 'pprotein.service']:
             if enabled(service):
                 config.sudo('systemctl', 'restart', service)
+        if host == config.require('PPROTEIN_HOST') and enabled('pprotein.service'):
+            step = 'pprotein-config'
+            for name, endpoint in [('alp', 'httplog'), ('slp', 'slowlog')]:
+                path = config.tools / 'pprotein' / (name + '.yml')
+                if path.is_file():
+                    config.run(['curl', '-fsS', '--max-time', '10', '-X', 'POST',
+                                '-H', 'Content-Type: application/yaml', '--data-binary', '@' + str(path),
+                                f'http://127.0.0.1:9000/api/{endpoint}/config'], capture=True)
         step = 'truncate'
         for key in ['NGINX_LOG', 'SLOW_LOG']:
             log = Path(config.require(key))

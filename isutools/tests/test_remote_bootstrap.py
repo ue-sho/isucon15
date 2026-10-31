@@ -122,6 +122,16 @@ class RemoteDeployTests(Sandbox):
         self.assertEqual((self.logs / 'nginx/access.log').stat().st_size, 0)
         self.assertEqual((self.logs / 'mysql/slow.log').stat().st_size, 0)
 
+    def test_applies_analysis_configs_only_on_pprotein_host(self):
+        with (self.work / 'isutools/config.env').open('a') as file:
+            file.write('PPROTEIN_HOST=s1\n')
+        write(self.hosts / 's1/enabled', 'nginx\nisuapp-node.service\npprotein.service\n')
+        self.deploy()
+        calls = self.calls()
+        for endpoint in ['httplog', 'slowlog']:
+            self.assertIn(f'http://127.0.0.1:9000/api/{endpoint}/config', calls)
+        self.assertLess(calls.index('systemctl restart pprotein.service'), calls.index('/api/slowlog/config'))
+
     def test_postgresql_log_permissions_are_preserved(self):
         with (self.work / 'isutools/config.env').open('a') as file:
             file.write('DB_SERVICE=postgresql@16-main.service\n')

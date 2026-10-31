@@ -1,9 +1,33 @@
 #!/usr/bin/python3
 """Adapt pprotein 1.2.4's fixed `slp my` invocation to PostgreSQL."""
 import os
+import re
+import subprocess
 import sys
 
 PG_COLUMNS = 'count,query,min-query-time,max-query-time,sum-query-time,avg-query-time'
+HEADER = re.compile(rb'^(\d{4}-\d{2}-\d{2} [^\r\n]*? \[\d+\] )([A-Z]+):[ \t]*(.*)')
+DURATION = re.compile(rb'^duration: ([0-9.]+) ms[ \t]+(?:statement|execute [^:]+):[ \t]*(.*)')
+
+
+def normalize_log(lines):
+    """Count statement/execute once; join SQL continuations, omit Parse/Bind/DETAIL."""
+    pending = None
+    for line in lines:
+        header = HEADER.match(line)
+        if header:
+            if pending is not None:
+                prefix, duration, parts = pending
+                yield prefix + b'LOG:  duration: ' + duration + b' ms  statement: ' + b' '.join(b' '.join(parts).split()) + b'\n'
+                pending = None
+            match = DURATION.match(header[3]) if header[2] == b'LOG' else None
+            if match:
+                pending = (header[1], match[1], [match[2]])
+        elif pending is not None:
+            pending[2].append(line.rstrip(b'\r\n'))
+    if pending is not None:
+        prefix, duration, parts = pending
+        yield prefix + b'LOG:  duration: ' + duration + b' ms  statement: ' + b' '.join(b' '.join(parts).split()) + b'\n'
 
 
 def postgres_args(args):
@@ -22,4 +46,28 @@ def postgres_args(args):
 
 
 if __name__ == '__main__':
-    os.execv('/usr/local/bin/slp', ['slp', *postgres_args(sys.argv[1:])])
+    original = sys.argv[1:]
+    if not original or original[0] != 'my':
+        os.execv('/usr/local/bin/slp', ['slp', *original])
+    args = postgres_args(original)
+    filename = None
+    for index, arg in enumerate(args):
+        if arg == '--file':
+            filename = args[index + 1]
+            del args[index:index + 2]
+            break
+        if arg.startswith('--file='):
+            filename = arg.split('=', 1)[1]
+            del args[index]
+            break
+    # Streaming avoids copying the entire original log into memory or temp files.
+    source = open(filename, 'rb') if filename else sys.stdin.buffer
+    with source:
+        child = subprocess.Popen(['/usr/local/bin/slp', *args], stdin=subprocess.PIPE)
+        try:
+            with child.stdin:
+                for line in normalize_log(source):
+                    child.stdin.write(line)
+        except BrokenPipeError:
+            pass
+        sys.exit(child.wait())

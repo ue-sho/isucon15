@@ -132,3 +132,17 @@ flowchart LR
 アプリのコードはNode.js・HonoでHTTPを処理し、pgの接続プールでPostgreSQLへ接続する。nginxは127.0.0.1:8080へプロキシする。リージョンとDB接続先は環境変数で指定する。実際のDB接続環境変数の値は今回表示・調査していない。4台ともローカルPostgreSQLクラスタはactiveだが、保存データの観測ではasia2だけにSQLログがあり、他3台は収集期間中空だった。
 
 pprotein本体の作業ディレクトリは`/var/lib/pprotein`、保存先は`/var/lib/pprotein/data/`。agentがログを返し、Node profilerはCPUプロファイルを返す。initializeハンドラからpproteinへgroup収集を要求する。asia2にはNodeアプリが動いておらず、6060番は接続拒否を確認済み。現在のgroup設定にはまだasia2のpprofが含まれ、その対象は成功しない。
+
+## PostgreSQLログ形式による取りこぼしとTSV崩れの修正
+
+最新グループ`2026-10-31_02-04-20.390592`のasia2ログ`dminl6ll2zuo-slowlog.log`は318,249,157バイト、API状態はok / Readyだった。先頭2,097,109バイトだけを調査したところ、durationの内訳はstatement 312件、parse 755件、bind 2,260件、execute 2,250件。既存slpのpgモードはexecuteを取り込まず、複数行SQLが出力TSVを崩していた。さらに旧フィルターは先頭空白・DELETE・WITH等を除外し、この試料では5件しか集計できていなかった。
+
+アダプターにストリーム正規化を追加。statementとexecuteの実行時間・SQLを保持し、executeをslpが扱えるstatement形式へ変換する。SQLの改行・タブ・連続空白を1行の空白へ揃え、Parse/BindおよびパラメーターのDETAIL行は除外する。元ログとDBのSQLは変更しない。トランザクションを含む実行をフィルターで落とさない`isutools/pprotein/slp.yml`を追加した。
+
+同じ試料の修正後は2,562実行・71種類のSQL、総時間103.586692秒となり、元のstatement + execute件数と一致した。すべてのTSV行が6列であることも確認済み。これは先頭2MBの検証であり、318MB全体の件数・時間ではない。初期化先頭で収集を開始するため、初期化SQLも含み得る。
+
+デプロイ処理はpproteinホストでサービス再起動後、リポジトリ内のalp.ymlとslp.ymlをpproteinの設定APIへ登録する。alp.ymlはID・日付を15パターンへ集約し、フィード種別と友達申請の操作を分離する設定。次回デプロイではUIで編集した同設定はリポジトリの内容へ置き換わる。既存の解析キャッシュは更新しないので、既存データの再解析には前述の再登録が必要。
+
+修正後の実環境へのデプロイ・設定登録・全ログ再解析は未実行。
+
+検証：Python unittest 121件成功。複数行executeの正規化、Parse/Bind/DETAILの除外、statementの維持、デプロイ時の解析設定API反映をテストした。alpの代表URLについてもID集約と固定パスの分離をローカルで確認した。
