@@ -41,7 +41,7 @@ def backend(label):
                 self.close_connection = True
                 self.connection.close()
                 return
-            status = 409 if self.path.endswith('conflict=1') else 200
+            status = 409 if self.path.endswith('conflict=1') else 503 if self.path.endswith('unavailable=1') else 200
             result = json.dumps(dict(
                 backend=label, path=self.path, method=self.command,
                 body=body.decode(), authorization=self.headers.get('Authorization'),
@@ -55,6 +55,10 @@ def backend(label):
             self.wfile.write(result)
 
         do_POST = do_GET
+        do_PUT = do_GET
+        do_DELETE = do_GET
+        do_PATCH = do_GET
+        do_OPTIONS = do_GET
 
         def log_message(self, *args):
             pass
@@ -83,6 +87,8 @@ class RegionalAPIProxyTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr.decode())
 
     def test_real_nginx_routing_and_forwarding(self):
+        desktop = 'Docker Desktop' in subprocess.check_output(['docker', 'info', '--format', '{{.OperatingSystem}}'], text=True)
+        backend_host = 'host.docker.internal' if desktop else '127.0.0.1'
         with backend('local') as (local_port, local_calls):
             for host, port, region in [('europe1', 8081, 'europe'), ('america1', 8082, 'america')]:
                 with self.subTest(host=host), backend(region) as (remote_port, remote_calls):
@@ -91,10 +97,15 @@ class RegionalAPIProxyTest(unittest.TestCase):
                         edge_port = free_port()
                         upstream = (ROOT / host / 'etc/nginx/conf.d/isureal-regional-api.conf').read_text()
                         self.assertIn(f'192.168.1.10:{port}', upstream)
-                        upstream = upstream.replace(f'192.168.1.10:{port}', f'127.0.0.1:{remote_port}')
+                        upstream = upstream.replace(f'192.168.1.10:{port}', f'{backend_host}:{remote_port} max_fails=0')
+                        # 試験だけ予備upstreamを追加。snippetのoffがなければ再送される条件。
+                        upstream = upstream.replace('  keepalive 16;', f'  server {backend_host}:{local_port} backup;\n  keepalive 16;')
                         site = (ROOT / host / 'etc/nginx/sites-available/isureal.conf').read_text()
-                        site = site.replace('listen 80 default_server', f'listen {edge_port} default_server')
-                        local_upstream = (ROOT / host / 'etc/nginx/conf.d/isureal-local-api.conf').read_text().replace('127.0.0.1:8080', f'127.0.0.1:{local_port}')
+                        # 下の再送用テスト設定を対象外経路へ継承させない（本来の既定値）。
+                        site = site.replace('location /api/ {', 'location /api/ {\n    proxy_next_upstream error timeout;')
+                        if not desktop:
+                            site = site.replace('listen 80 default_server', f'listen {edge_port} default_server')
+                        local_upstream = (ROOT / host / 'etc/nginx/conf.d/isureal-local-api.conf').read_text().replace('127.0.0.1:8080', f'{backend_host}:{local_port}')
                         gzip_config = '\n'.join(line for line in (ROOT / host / 'etc/nginx/nginx.conf').read_text().splitlines() if line.strip().startswith('gzip'))
                         site = site.replace('/etc/nginx/snippets/', f'/repo/{host}/etc/nginx/snippets/')
                         (root / 'nginx.conf').write_text(f'''
@@ -104,6 +115,7 @@ error_log /test/error.log;
 events {{ worker_connections 128; }}
 http {{
   access_log off;
+  proxy_next_upstream error timeout http_503 non_idempotent;
   client_body_temp_path /test/body;
   proxy_temp_path /test/proxy;
   fastcgi_temp_path /test/fastcgi;
@@ -116,7 +128,8 @@ http {{
 }}
 ''')
                         name = 'isu15-regional-test-' + uuid.uuid4().hex[:10]
-                        common = ['docker', 'run', '--rm', '--user', f'{os.getuid()}:{os.getgid()}', '--entrypoint', 'nginx', '--network', 'host', '-v', f'{root}:/test', '-v', f'{ROOT}:/repo:ro']
+                        network = ['-p', f'127.0.0.1:{edge_port}:80'] if desktop else ['--network', 'host']
+                        common = ['docker', 'run', '--rm', '--user', f'{os.getuid()}:{os.getgid()}', '--entrypoint', 'nginx', *network, '-v', f'{root}:/test', '-v', f'{ROOT}:/repo:ro']
                         check = subprocess.run(common + ['nginx:1.24', '-e', 'stderr', '-t', '-c', '/test/nginx.conf'], capture_output=True)
                         self.assertEqual(check.returncode, 0, check.stderr.decode())
                         subprocess.run(common + ['-d', '--name', name, 'nginx:1.24', '-c', '/test/nginx.conf', '-g', 'daemon off;'], check=True, capture_output=True)
@@ -149,6 +162,49 @@ http {{
                                     self.assertEqual(payload['authorization'], 'Bearer fixture')
                                     self.assertEqual(payload['client_ip'], '203.0.113.7')
                                     self.assertEqual(payload['country'], 'GB' if region == 'europe' else 'US')
+                            updates = [('/api/friend-requests', 'POST')]
+                            updates += [(f'/api/friend-requests/request%2Did/{action}', 'POST') for action in ['accept', 'reject', 'cancel']]
+                            updates += [('/api/friendships/user%2Did', 'DELETE')]
+                            updates += [(f'/api/{kind}/user%2Did', method) for kind in ['follows', 'blocks'] for method in ['PUT', 'DELETE']]
+                            for path, method in updates:
+                                body = b'{"recipientId":"target","text":"\\u65e5"}'
+                                with request(path + '?cursor=a%2Fb&x=1&x=2', method, body) as response:
+                                    self.assertEqual(response.status, 200)
+                                    payload = json.load(response)
+                                    self.assertEqual(payload['backend'], region)
+                                    self.assertEqual(payload['method'], method)
+                                    self.assertEqual(payload['path'], path + '?cursor=a%2Fb&x=1&x=2')
+                                    self.assertEqual(payload['body'].encode(), body)
+                                    self.assertEqual(payload['authorization'], 'Bearer fixture')
+                                    self.assertEqual(payload['client_ip'], '203.0.113.7')
+                                    self.assertEqual(payload['country'], 'GB' if region == 'europe' else 'US')
+                                allowed = {m for p, m in updates if p == path}
+                                for unsupported in {'GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'} - allowed:
+                                    with request(path, unsupported) as response:
+                                        self.assertEqual(json.load(response)['backend'], 'local')
+                                # 完了応答を受け取れない更新を再送・localへfallbackしない。
+                                before_remote, before_local = len(remote_calls), len(local_calls)
+                                with request(path + '?disconnect=1', method, body) as response:
+                                    self.assertEqual(response.status, 502)
+                                self.assertEqual(len(remote_calls), before_remote + 1)
+                                self.assertEqual(len(local_calls), before_local)
+                                before_remote, before_local = len(remote_calls), len(local_calls)
+                                with request(path + '?unavailable=1', method, body) as response:
+                                    self.assertEqual(response.status, 503)
+                                    self.assertEqual(json.load(response)['backend'], region)
+                                self.assertEqual(len(remote_calls), before_remote + 1)
+                                self.assertEqual(len(local_calls), before_local)
+                                with request(path + '?conflict=1', method, body) as response:
+                                    self.assertEqual(response.status, 409)
+                                    self.assertEqual(json.load(response)['backend'], region)
+                            for path, method in [
+                                ('/api/relationships/friends', 'GET'), ('/api/me/account-deletion', 'POST'),
+                                ('/api/friend-requests/', 'POST'), ('/api/friend-requests/id/unknown', 'POST'),
+                                ('/api/friend-requests/id/accept/extra', 'POST'), ('/api/friendships/id/', 'DELETE'),
+                                ('/api/follows/id/extra', 'PUT'), ('/api/blocks/', 'DELETE'),
+                            ]:
+                                with request(path, method) as response:
+                                    self.assertEqual(json.load(response)['backend'], 'local')
                             image_body = b'--fixture\r\nJPEG-upload\r\n--fixture--\r\n'
                             with request('/api/posts', 'POST', image_body) as response:
                                 payload = json.load(response)
