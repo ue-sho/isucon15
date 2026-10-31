@@ -98,7 +98,8 @@ export class ImageFiles {
       try {
         await handle.writeFile(data);
         await handle.chmod(0o644);
-        await handle.sync();
+        // DBに永続化済みの派生キャッシュ。write完了後のrenameで公開し、
+        // リクエスト中のfsyncは省く。消失時はDBから再生成できる。
       } finally { await handle.close(); }
       // 完全なファイルだけ公開する。別workerと同時でも同じ版の同じ内容になる。
       await rename(temporary, file.path);

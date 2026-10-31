@@ -5,7 +5,7 @@
 ## 配信と整合性
 
 - `ISUREAL_IMAGE_CACHE_DIR`が空なら従来のDB本文配信。3台のメインアプリのsystemd drop-inでは `/var/cache/isureal/images` を指定する。追加の地域別APIサービスでは有効にしない。
-- ファイルは `initial/<先頭2桁>/<SHA-256>.jpg` または `runtime/<世代>/<先頭2桁>/<SHA-256>.jpg`（PNGは `.png`）。初期化時はinitialフォルダをコピーせず、そのまま再利用する。キーに画像の世代、画像ID、所有者、作成日時、画像行のxmin、MIMEを含める。初期画像の世代は初期データ境界の日時から算出し、追加画像はDB共通の世代を使う。一時ファイルを同期してからrenameし、不完全なファイルを公開しない。
+- ファイルは `initial/<先頭2桁>/<SHA-256>.jpg` または `runtime/<世代>/<先頭2桁>/<SHA-256>.jpg`（PNGは `.png`）。初期化時はinitialフォルダをコピーせず、そのまま再利用する。キーに画像の世代、画像ID、所有者、作成日時、画像行のxmin、MIMEを含める。初期画像の世代は初期データ境界の日時から算出し、追加画像はDB共通の世代を使う。一時ファイルへの書き込み完了後にrenameし、不完全なファイルを公開しない。通常APIでは派生キャッシュのfsyncを待たず、消失時はDBから再生成する。
 - 署名・期限の形式と検証を維持する。毎回DBで所有者の有効状態、プロフィール・投稿・RealMojiの参照、削除・差し替えを確認する。ファイル命中時だけ画像本体のbytea取得を省く。書き出し後にも期限を確認する。
 - nginxの `/_isureal_images/` は `internal`。クライアントから直接取得できない。`Cache-Control: no-store` を維持し、Range・条件付き更新によって既存の200応答を変えない。
 - `reset.sql`は初期化トランザクション内で `initial_data_boundary.image_cache_generation` を更新する。各リクエストでこの値を取得し、全地域・全workerの追加画像の過去ファイルを論理的に無効化する。初期画像のファイルは再利用する。初期化後に画像IDが再利用されても古いファイルを使わない。
@@ -43,7 +43,7 @@ DB/nginx統合試験は空の専用DBに限り、`IMAGE_SQL_TEST_PORT=<port> IMA
 ssh asia1 'sudo systemd-run --wait --pipe --collect --unit=isureal-image-export --property=User=isucon --property=Group=isucon --property=WorkingDirectory=/home/isucon/webapp/nodejs --property=EnvironmentFile=/home/isucon/env.sh --setenv=ISUREAL_IMAGE_CACHE_DIR=/var/cache/isureal/images /home/isucon/local/node/bin/node src/export_image_files.ts'
 ```
 
-単一のREAD ONLY REPEATABLE READトランザクションのcursorで4,096画像ずつ取得し、32並列で一時ファイルを書き出す。バッチのファイルシステム同期後にrenameして公開し、再度同期する。4,096件ごとに進捗を出力する。通常の画像APIの単発書き出しは引き続きファイル単位で同期する。書き出し済みのファイルはスキップし、written/existing/unsupported/bytesを集計する。JPEG/PNG以外は従来のDB本文配信であり、unsupportedとして数える。容量不足・書き込み失敗は成功扱いにせず停止する。途中でinitializeにより世代が変わった場合も失敗にし、終了後の再実行を促す。DB変更は行わず、再実行可能。
+単一のREAD ONLY REPEATABLE READトランザクションのcursorで4,096画像ずつ取得し、32並列で一時ファイルを書き出す。バッチのファイルシステム同期後にrenameして公開し、再度同期する。4,096件ごとに進捗を出力する。通常の画像APIの単発書き出しはfsyncを待たず、完全に書いた一時ファイルをrenameして公開する。書き出し済みのファイルはスキップし、written/existing/unsupported/bytesを集計する。JPEG/PNG以外は従来のDB本文配信であり、unsupportedとして数える。容量不足・書き込み失敗は成功扱いにせず停止する。途中でinitializeにより世代が変わった場合も失敗にし、終了後の再実行を促す。DB変更は行わず、再実行可能。
 
 追加確認: PostgreSQLで一括書き出し、再実行、初期化後の初期画像再利用、容量不足、初期化競合を検証。実nginxを含む画像API30件も成功し、reset後の初期画像取得がbyteaを取得しないことと、追加画像ID再利用時の無効化を確認した。本番の全件所要時間・ディスク使用量は未計測。
 
@@ -56,3 +56,17 @@ ssh asia1 'sudo systemd-run --wait --pipe --collect --unit=isureal-image-export 
 本番観測: asia 1,808,830件/13,593,311,590 bytes、europe 7,055件/85,079,513 bytes、america 11,257件/121,369,045 bytes。欧米への全件複製は約10MB/秒の転送が制約となり短時間で終わらないため、地域分担を採用する。書き出し時の配置判断に使うregionは取得後の認可判断には使わない。ユーザーの地域が変わってもDBから取得可能である。
 
 追加観測: initial_data_boundaryの統計未作成により実際1行を1,200行と推定し、一括書き出しのcursorが約21億行の見積もり・巨大なハッシュ結合を選んでいた。asia2で同テーブルのみANALYZEし、1行の境界と約180万行の画像を順次走査する計画へ改善。003と列追加migrationにもANALYZEを追加し、新規構築時の再発を防ぐ。この統計更新は本番へ適用済みで、行データは変更しない。
+
+## 画像GETの待ち時間削減（2026-10-31、Issue #37向け記録）
+
+作業ブランチ: `perf/image-warm-validation`。署名計算・JPEG検証の別作業には変更を加えない。
+
+同じ署名付きURLを同じworkerで再取得した場合、所有者・画像行の版などの探索ヒントを使い、DB往復を2回から1回に削減する。ヒントは最大2,048件、キー4,096文字以内。認可結果はキャッシュせず、毎回DBで画像の存在・所有者の状態・参照の有効性・画像版・画像キャッシュ世代・署名キャッシュ世代・現在の鍵のSHA-256を照合する。鍵自体は照合SQLのパラメータに渡さない。照合不一致ならヒントを破棄して通常経路で再取得し、更新画像を取得する。初回URL・別workerでは従来の2 SQL。
+
+単発キャッシュ作成のfsyncを省略する。永続データは従来どおりPostgreSQLであり、キャッシュの電源断耐性には依存しない。write・close後のrenameは維持する。一括書き出しの同期処理は変更しない。
+
+検証: Node.js 26.10.0、ローカルPostgreSQL 17.11と実nginx 1.24で画像API31件成功。同一URLの1 SQL、画像更新後の新しい内容、削除・鍵変更の拒否、世代変更の再取得、初期化・再起動相当・2地域・本文・内部URL拒否を確認。全体テスト82成功・12スキップ。型検査成功。本番PG16での検証、実ベンチでの命中率・得点改善は未確認。本番反映・再起動・初期化・ベンチは未実施。
+
+戻し方: このブランチの画像API・画像ファイル処理の変更を戻す。DB migrationやnginx設定の追加変更は不要。
+
+GitHub CLIが未認証のためIssueへの転記は未実施。

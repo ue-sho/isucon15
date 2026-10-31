@@ -19,7 +19,7 @@ const port = process.env.IMAGE_SQL_TEST_PORT;
 test("image API with PostgreSQL partitions", { skip: !port }, async (t) => {
   const config = {
     dbHost: "127.0.0.1", dbPort: port!, dbUser: "postgres", dbPassword: "",
-    dbName: "isureal_image_index_test", region: "asia", logLevel: "error",
+    dbName: process.env.IMAGE_SQL_TEST_DB ?? "isureal_image_index_test", region: "asia", logLevel: "error",
   };
   const admin = new pg.Client({ host: config.dbHost, port: Number(port), user: config.dbUser, database: config.dbName });
   await admin.connect();
@@ -227,6 +227,51 @@ test("image API with PostgreSQL partitions", { skip: !port }, async (t) => {
     const reused = await request(url("new-after-snapshot"), undefined, files);
     assert.notEqual(reused.response.headers.get("x-accel-redirect"), newURI);
     assert.deepEqual(await readFile(join(files.directory, reused.response.headers.get("x-accel-redirect")!.slice("/_isureal_images/".length))), Buffer.from([8, 9]));
+
+    await t.test("同一URLのwarm取得は1 SQLで認可し、更新・削除・鍵変更を即時反映", async () => {
+      let queries = 0;
+      const wrapped = { async get<T>(sql: string, ...args: unknown[]) {
+        queries++;
+        return db.get<T>(sql, ...args);
+      } } as DB;
+      const app = new Hono<Env>().onError(apiErrorHandler);
+      app.get("/api/images/:imageId", getImageHandler({ db: wrapped, imageFiles: files } as HandlerContext));
+      const first = await app.request(url("valid"));
+      const uri = first.headers.get("x-accel-redirect");
+      queries = 0;
+      const fetch = () => app.request(url("valid"));
+      assert.equal((await fetch()).status, 200);
+      assert.equal(queries, 1);
+      queries = 0;
+      assert.equal((await fetch()).headers.get("x-accel-redirect"), uri);
+      assert.equal(queries, 1);
+      await admin.query("UPDATE image_signature_cache_state SET generation=generation+1 WHERE singleton");
+      queries = 0;
+      assert.equal((await fetch()).status, 200);
+      assert.equal(queries, 3);
+      await admin.query("UPDATE initial_data_boundary SET image_cache_generation=gen_random_uuid()::text");
+      queries = 0;
+      assert.equal((await fetch()).status, 200);
+      assert.equal(queries, 3);
+      try {
+        await admin.query("UPDATE image_objects SET data=$1 WHERE id='valid'", [Buffer.from([7, 8])]);
+        queries = 0;
+        const updated = await fetch();
+        assert.equal(updated.status, 200);
+        assert.notEqual(updated.headers.get("x-accel-redirect"), uri);
+        assert.equal(queries, 3);
+        await admin.query("UPDATE realmojis SET deleted_at=clock_timestamp() WHERE id='r-valid'");
+        await forbidden(await fetch());
+        await admin.query("UPDATE realmojis SET deleted_at=NULL WHERE id='r-valid'");
+        assert.equal((await fetch()).status, 200);
+        await admin.query("UPDATE users SET secret_key_hash=repeat('cd',32) WHERE id='reactor'");
+        await forbidden(await fetch());
+      } finally {
+        await admin.query("UPDATE users SET secret_key_hash=repeat('ab',32) WHERE id='reactor'");
+        await admin.query("UPDATE realmojis SET deleted_at=NULL WHERE id='r-valid'");
+        await admin.query("UPDATE image_objects SET data=$1 WHERE id='valid'", [original]);
+      }
+    });
 
     if (process.env.IMAGE_FILE_NGINX_TEST === "1") {
       const nginx = await imageNginx(db, files);
