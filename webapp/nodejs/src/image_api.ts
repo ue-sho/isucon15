@@ -40,9 +40,9 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
 
-    const owner = await h.db.get<{ secret_key_hash: string }>(
+    const owner = await h.db.get<{ secret_key_hash: string; owner_user_id: string; created_at: Temporal.Instant }>(
       `
-   SELECT u.secret_key_hash
+   SELECT u.secret_key_hash, i.owner_user_id, i.created_at
    FROM image_objects i JOIN users u ON u.id = i.owner_user_id
    WHERE i.id = $1 AND u.status = 'active'
   `,
@@ -57,12 +57,13 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
 
-    // 削除状態を毎回確認する。即時反映も5秒以内の許容範囲に含まれる。
+    // 所有者検索で得た日時でpartitionを絞り、ユーザーもPKで検索する。
+    // 削除状態はこのSQLで改めて確認し、署名検証前には画像本体を取得しない。
     const object = await h.db.get<{ data: Uint8Array<ArrayBuffer>; media_type: string }>(
       `
    SELECT i.data, i.media_type
    FROM image_objects i JOIN users u ON u.id = i.owner_user_id AND u.status = 'active'
-   WHERE i.id = $1 AND (
+   WHERE i.id = $1 AND i.created_at = $2 AND u.id = $3 AND (
      u.profile_image_id = i.id
      OR EXISTS (
        SELECT 1 FROM posts p
@@ -77,6 +78,8 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
    )
   `,
       input.imageId,
+      owner.created_at,
+      owner.owner_user_id,
     );
     if (!object) {
       throw new APIError(403, "image_forbidden");
