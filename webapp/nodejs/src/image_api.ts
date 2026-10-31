@@ -1,5 +1,5 @@
-import { timingSafeEqual } from "node:crypto";
-import type { Handler } from "hono";
+import { createHash, timingSafeEqual } from "node:crypto";
+import type { Context, Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind, parseQuery, rawQuery } from "./bind.ts";
 import { imageSignature, imageSigningKey, withImageSignatureCacheGeneration } from "./image_signature.ts";
@@ -19,8 +19,12 @@ function parseImageExp(value: string): number | null {
   return /^-?\d+$/.test(value) && String(exp) === value ? exp : null;
 }
 
+type ImageOwner = { secret_key_hash: string; owner_user_id: string; created_at: Temporal.Instant; image_version: string; image_cache_generation: string; image_file_generation: string; media_type: string; signature_cache_generation: string };
+
 export function getImageHandler(h: HandlerContext): Handler<Env> {
-  return async (c) => {
+  // 認可結果ではなく探索用ヒント。命中しても下のSQLで現在の状態を照合する。
+  const hints = new Map<string, ImageOwner>();
+  async function handle(c: Context<Env>, useHint = true): Promise<Response> {
     c.header("Cache-Control", "no-store");
     let input;
     try {
@@ -41,7 +45,9 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "image_forbidden");
     }
 
-    const owner = await h.db.get<{ secret_key_hash: string; owner_user_id: string; created_at: Temporal.Instant; image_version: string; image_cache_generation: string; image_file_generation: string; media_type: string; signature_cache_generation: string }>(
+    const hintKey = JSON.stringify([input.imageId, input.exp, input.sig]);
+    const hint = useHint && h.imageFiles ? hints.get(hintKey) : undefined;
+    const owner = hint ?? await h.db.get<ImageOwner>(
       `
    SELECT u.secret_key_hash, i.owner_user_id, i.created_at,
      (SELECT generation::text FROM image_signature_cache_state WHERE singleton) AS signature_cache_generation
@@ -87,13 +93,21 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
      )
    )
    ${h.imageFiles ? "AND (SELECT image_cache_generation FROM initial_data_boundary) = $4 AND i.xmin::text = $5" : ""}
+   ${hint ? `AND encode(sha256(convert_to(u.secret_key_hash, 'UTF8')), 'hex') = $6
+     AND (SELECT generation::text FROM image_signature_cache_state WHERE singleton) = $7` : ""}
   `,
       input.imageId,
       owner.created_at,
       owner.owner_user_id,
       ...(h.imageFiles ? [owner.image_cache_generation, owner.image_version] : []),
+      ...(hint ? [createHash("sha256").update(owner.secret_key_hash).digest("hex"), owner.signature_cache_generation] : []),
     );
     if (!object) {
+      // 更新・初期化・鍵変更時はヒントを捨て、現在のDBから通常経路で再取得。
+      if (hint) {
+        hints.delete(hintKey);
+        return handle(c, false);
+      }
       throw new APIError(403, "image_forbidden");
     }
     if (exp <= unix(Temporal.Now.instant())) {
@@ -103,8 +117,14 @@ export function getImageHandler(h: HandlerContext): Handler<Env> {
       if (exp <= unix(Temporal.Now.instant())) throw new APIError(403, "image_forbidden");
       c.header("Content-Type", object.media_type);
       c.header("X-Accel-Redirect", file.uri);
+      if (hintKey.length <= 4096) {
+        hints.delete(hintKey);
+        if (hints.size >= 2048) hints.delete(hints.keys().next().value!);
+        hints.set(hintKey, owner);
+      }
       return c.body(null, 200);
     }
     return blobResponse(c, 200, object.media_type, object.data);
-  };
+  }
+  return (c) => handle(c);
 }
