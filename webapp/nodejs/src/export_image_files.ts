@@ -1,6 +1,6 @@
 import { configFromEnv } from "./config.ts";
 import { DB, type Queryer } from "./db.ts";
-import { ImageFiles, imageFileGenerationSQL } from "./image_files.ts";
+import { type ImageFileRef, ImageFiles, imageFileGenerationSQL } from "./image_files.ts";
 import { pathToFileURL } from "node:url";
 
 type Image = {
@@ -21,21 +21,21 @@ export async function exportImageFiles(db: DB, files: ImageFiles) {
       ${imageFileGenerationSQL} AS image_file_generation
     FROM image_objects i CROSS JOIN initial_data_boundary b`);
   for (;;) {
-    const rows = await tx.select<Image>("FETCH FORWARD 512 FROM image_export");
+    const rows = await tx.select<Image>("FETCH FORWARD 4096 FROM image_export");
     if (!rows.length) break;
-    for (let start = 0; start < rows.length; start += 8) {
-    const writes = await Promise.allSettled(rows.slice(start, start + 8).map(async (row) => {
-      const file = files.reference(row.image_file_generation, row.id, row.owner_user_id, row.created_at, row.image_version, row.media_type);
-      if (!file) { result.unsupported++; return; }
-      if (await files.has(file)) { result.existing++; return; }
-      if (!await files.put(file, row.data)) throw new Error("image export stopped: disk space or write failure");
-      result.written++;
-      result.bytes += row.data.byteLength;
-    }));
-    const failed = writes.find((write) => write.status === "rejected");
-    if (failed?.status === "rejected") throw failed.reason;
+    const pending: { file: ImageFileRef; data: Uint8Array<ArrayBuffer> }[] = [];
+    for (let start = 0; start < rows.length; start += 32) {
+      await Promise.all(rows.slice(start, start + 32).map(async row => {
+        const file = files.reference(row.image_file_generation, row.id, row.owner_user_id, row.created_at, row.image_version, row.media_type);
+        if (!file) { result.unsupported++; return; }
+        if (await files.has(file)) { result.existing++; return; }
+        pending.push({ file, data: row.data });
+      }));
     }
-    if ((result.written + result.existing + result.unsupported) % 6400 === 0) console.log(JSON.stringify({ progress: true, ...result }));
+    await files.putBatch(pending);
+    result.written += pending.length;
+    result.bytes += pending.reduce((sum, e) => sum + e.data.byteLength, 0);
+    if ((result.written + result.existing + result.unsupported) % 4096 === 0) console.log(JSON.stringify({ progress: true, ...result }));
   }
   await tx.exec("CLOSE image_export");
   await tx.commit();

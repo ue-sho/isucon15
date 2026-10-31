@@ -43,6 +43,8 @@ DB/nginx統合試験は空の専用DBに限り、`IMAGE_SQL_TEST_PORT=<port> IMA
 ssh asia1 'sudo systemd-run --wait --pipe --collect --unit=isureal-image-export --property=User=isucon --property=Group=isucon --property=WorkingDirectory=/home/isucon/webapp/nodejs --property=EnvironmentFile=/home/isucon/env.sh --setenv=ISUREAL_IMAGE_CACHE_DIR=/var/cache/isureal/images /home/isucon/local/node/bin/node src/export_image_files.ts'
 ```
 
-単一のREAD ONLY REPEATABLE READトランザクションのcursorで512画像ずつ取得し、8並列で書き出す。6,400件ごとに進捗を出力する。書き出し済みのファイルはスキップし、written/existing/unsupported/bytesを集計する。JPEG/PNG以外は従来のDB本文配信であり、unsupportedとして数える。容量不足・書き込み失敗は成功扱いにせず停止する。途中でinitializeにより世代が変わった場合も失敗にし、終了後の再実行を促す。DB変更は行わず、再実行可能。
+単一のREAD ONLY REPEATABLE READトランザクションのcursorで4,096画像ずつ取得し、32並列で一時ファイルを書き出す。バッチのファイルシステム同期後にrenameして公開し、再度同期する。4,096件ごとに進捗を出力する。通常の画像APIの単発書き出しは引き続きファイル単位で同期する。書き出し済みのファイルはスキップし、written/existing/unsupported/bytesを集計する。JPEG/PNG以外は従来のDB本文配信であり、unsupportedとして数える。容量不足・書き込み失敗は成功扱いにせず停止する。途中でinitializeにより世代が変わった場合も失敗にし、終了後の再実行を促す。DB変更は行わず、再実行可能。
 
 追加確認: PostgreSQLで一括書き出し、再実行、初期化後の初期画像再利用、容量不足、初期化競合を検証。実nginxを含む画像API30件も成功し、reset後の初期画像取得がbyteaを取得しないことと、追加画像ID再利用時の無効化を確認した。本番の全件所要時間・ディスク使用量は未計測。
+
+本番の速度調査では、asia1のディスクutilが約81%、書き込みが約2,300 IOPSだった。2万画像のサンプルで内容の重複は0件。全件出力はバッチ同期へ変更し、小ファイルごとの同期待ちを減らす。GNU `sync -f` が必要（本番で存在確認済み）。

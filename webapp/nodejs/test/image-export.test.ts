@@ -30,14 +30,14 @@ test("全画像の一括書き出し・再実行・世代変更・失敗後の�
   assert.equal((await exportImageFiles(db, files)).existing, 1024);
   class ResetDuringWrite extends ImageFiles {
     reset = false;
-    override async put(file: Parameters<ImageFiles["put"]>[0], data: Parameters<ImageFiles["put"]>[1]) {
+    override async putBatch(entries: Parameters<ImageFiles["putBatch"]>[0]) {
       if (!this.reset) {
         this.reset = true;
         const other = new DB(config, 1);
         try { await other.exec("UPDATE initial_data_boundary SET image_cache_generation=gen_random_uuid()::text"); }
         finally { await other.end(); }
       }
-      return super.put(file, data);
+      return super.putBatch(entries);
     }
   }
   await assert.rejects(exportImageFiles(db, new ResetDuringWrite(join(root, "reset"), 0)), /rerun export/);
