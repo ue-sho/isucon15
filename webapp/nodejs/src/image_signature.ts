@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHmac } from "node:crypto";
 import { unix } from "./time.ts";
 import type { User } from "./user.ts";
@@ -15,6 +16,21 @@ const signatureCacheEntryOverhead = 256;
 type SignatureCacheEntry = { signature: string; expiresAt: number; bytes: number };
 const signatureCache = new Map<string, SignatureCacheEntry>();
 let signatureCacheBytes = 0;
+const requestGeneration = new AsyncLocalStorage<bigint | undefined>();
+let latestGeneration: bigint | undefined;
+
+// The generation comes from the shared DB in the request's existing query.
+// Missing/old generations may calculate signatures, but never reuse or fill the cache.
+export function withImageSignatureCacheGeneration<T>(generation: unknown, callback: () => T): T {
+  const current = typeof generation === "string" && /^[1-9][0-9]*$/.test(generation)
+    ? BigInt(generation) : undefined;
+  if (current !== undefined && (latestGeneration === undefined || current > latestGeneration)) {
+    signatureCache.clear();
+    signatureCacheBytes = 0;
+    latestGeneration = current;
+  }
+  return requestGeneration.run(current, callback);
+}
 
 function removeCachedSignature(cacheKey: string, entry: SignatureCacheEntry): void {
   signatureCache.delete(cacheKey);
@@ -34,7 +50,9 @@ export function imageSignature(key: Buffer, imageID: string, exp: number | strin
   const nowSeconds = Math.floor(Date.now() / 1000);
   // Unusual/expired inputs still use the original calculation. This is only
   // cache admission, never URL validation or expiry normalization.
-  const cacheable = Number.isSafeInteger(expSeconds) && String(expSeconds) === expText && expSeconds > nowSeconds
+  const generation = requestGeneration.getStore();
+  const cacheable = generation !== undefined && generation === latestGeneration
+    && Number.isSafeInteger(expSeconds) && String(expSeconds) === expText && expSeconds > nowSeconds
     && key.length * 2 + imageID.length + expText.length <= signatureCacheMaxKeyLength;
   // JSON preserves field boundaries and exact strings, including ':' and
   // unpaired surrogates. Equal key bytes in different Buffers share an entry.

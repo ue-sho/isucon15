@@ -2,16 +2,16 @@ import { randomUUID } from "node:crypto";
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
-import { must } from "./db.ts";
+import { must, type Row } from "./db.ts";
 import { signedImageURL } from "./image_signature.ts";
 import { decodeJPEG } from "./jpeg.ts";
-import { canView, getPost, getPostWithAuthor, loadViewerContext, selectPostsWithAuthor, validLocation, type Post, type PostLocation } from "./post.ts";
+import { getPostPermissions, postColumns, postFromRow, getPost, getPostWithAuthor, selectPostsWithAuthor, validLocation, type Post, type PostLocation } from "./post.ts";
 import { getPostingWindow } from "./posting_window.ts";
 import { jsonResponse, noContent } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
 import { getSession } from "./session.ts";
 import { now } from "./time.ts";
-import { getUser, validUserText, type User } from "./user.ts";
+import { getUser, setImageKey, userColumns, userFromRow, validUserText, type User } from "./user.ts";
 import { newGetMeResponse } from "./user_api.ts";
 
 const createPostRequest = {
@@ -87,8 +87,9 @@ export function createPostHandler(h: HandlerContext): Handler<Env> {
 
     const userID = getSession(c)!.userID;
     await using tx = await h.db.begin();
-    must(await tx.get(`SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE`, userID));
-    const user = must(await getUser(tx, userID));
+    const userRow = must(await tx.get<Row>(`SELECT ${userColumns.join(", ")} FROM users WHERE id = $1 AND status = 'active' FOR NO KEY UPDATE`, userID));
+    const user = userFromRow(userRow);
+    setImageKey(user);
     type WindowRow = { id: string; local_date: string; starts_at: Temporal.Instant };
     // 投稿同士は共有し、期間終了の UPDATE は COMMIT まで待たせる。
     let window = await tx.get<WindowRow>(
@@ -129,11 +130,12 @@ export function createPostHandler(h: HandlerContext): Handler<Env> {
       postedAt,
     );
     const postID = randomUUID();
-    await tx.exec(
+    const postRow = must(await tx.get<Row>(
       `
-   INSERT INTO posts (id, author_id, posting_window_id, image_id, caption, visibility,
+   WITH p AS (INSERT INTO posts (id, author_id, posting_window_id, image_id, caption, visibility,
                       location_kind, latitude, longitude, locality, posted_at)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *)
+   SELECT ${postColumns} FROM p JOIN posting_windows w ON w.id = p.posting_window_id
   `,
       postID,
       userID,
@@ -146,8 +148,8 @@ export function createPostHandler(h: HandlerContext): Handler<Env> {
       location.longitude,
       location.locality,
       postedAt,
-    );
-    const post = must(await getPost(tx, postID));
+    ));
+    const post = postFromRow(postRow);
     await tx.commit();
     return jsonResponse(c, 201, newPostResponse(post, user));
   };
@@ -218,8 +220,7 @@ export function getPostHandler(h: HandlerContext): Handler<Env> {
     if (!post) {
       throw new APIError(404, "post_not_found");
     }
-    const viewer = await loadViewerContext(h.db, getSession(c)!.userID);
-    if (!viewer || !canView(viewer, post.post)) {
+    if (!(await getPostPermissions(h.db, getSession(c)!.userID, post.post)).view) {
       throw new APIError(404, "post_not_found");
     }
     return jsonResponse(c, 200, newPostResponse(post.post, post.author));
@@ -265,13 +266,14 @@ export function updatePostHandler(h: HandlerContext): Handler<Env> {
     if (window.endedAt) {
       throw new APIError(403, "post_not_editable");
     }
-    if (input.caption !== null) {
-      await tx.exec(`UPDATE posts SET caption = $2 WHERE id = $1`, post.id, input.caption);
-    }
-    if (input.visibility !== null) {
-      await tx.exec(`UPDATE posts SET visibility = $2 WHERE id = $1`, post.id, input.visibility);
-    }
-    post = must(await getPost(tx, post.id));
+    const updated = must(await tx.get<Row>(`
+      WITH p AS (
+        UPDATE posts SET caption = COALESCE($2, caption), visibility = COALESCE($3, visibility)
+        WHERE id = $1 RETURNING *
+      )
+      SELECT ${postColumns} FROM p JOIN posting_windows w ON w.id = p.posting_window_id
+    `, post.id, input.caption, input.visibility));
+    post = postFromRow(updated);
     const user = must(await getUser(tx, userID));
     await tx.commit();
     return jsonResponse(c, 200, newPostResponse(post, user));

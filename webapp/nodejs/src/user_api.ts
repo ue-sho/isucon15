@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
-import { must } from "./db.ts";
+import type { Row } from "./db.ts";
 import { signedImageURL } from "./image_signature.ts";
 import { jsonResponse, noContent } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
-import { createLoginSessionTx, getSession, invalidateLoginSession, sha256Hex } from "./session.ts";
-import { getUser, usernamePattern, userFromRow, validRegion, validUserText, type User } from "./user.ts";
+import { createLoginSessionForLockedUserTx, getSession, invalidateLoginSession, sha256Hex } from "./session.ts";
+import { getUser, setImageKey, userColumns, usernamePattern, userFromRow, validRegion, validUserText, type User } from "./user.ts";
 
 const registerRequest = {
   username: { json: "username" },
@@ -68,23 +68,26 @@ export function registerHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(400, "invalid_registration");
     }
     const secretKey = randomUUID();
-    await using tx = await h.db.begin();
-    // ユーザー名が一意である必要があります。
-    await tx.exec(`LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`);
-    const { exists } = must(await tx.get<{ exists: boolean }>(`SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)`, input.username));
-    if (exists) {
-      throw new APIError(409, "username_taken");
-    }
     const userID = randomUUID();
-    await tx.exec(
-      `INSERT INTO users (id, username, secret_key_hash, display_name, region) VALUES ($1, $2, $3, $4, $5)`,
+    await using tx = await h.db.begin();
+    // 別SQLにして、ロック待機後の新しいスナップショットで重複を確認する。
+    await tx.exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, input.username);
+    const row = await tx.get<Row>(
+      `INSERT INTO users (id, username, secret_key_hash, display_name, region)
+       SELECT $1::varchar(36), $2::varchar(64), $3::text, $4::text, $5::text
+       WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = $2::varchar(64))
+       RETURNING ${userColumns.join(", ")}`,
       userID,
       input.username,
       sha256Hex(secretKey),
       input.displayName,
       input.region,
     );
-    const user = must(await getUser(tx, userID));
+    if (!row) {
+      throw new APIError(409, "username_taken");
+    }
+    const user = userFromRow(row);
+    setImageKey(user);
     await tx.commit();
     return jsonResponse(c, 201, { secretKey, user: newSessionUserResponse(user) });
   };
@@ -109,7 +112,7 @@ export function loginHandler(h: HandlerContext): Handler<Env> {
     if (user.status !== "active" || user.secretKeyHash !== sha256Hex(input.secretKey)) {
       throw new APIError(401, "invalid_credentials");
     }
-    const session = await createLoginSessionTx(tx, user.id);
+    const session = await createLoginSessionForLockedUserTx(tx, user.id);
     await tx.commit();
     return jsonResponse(c, 200, { token: session.token, user: newSessionUserResponse(user) });
   };
@@ -132,7 +135,7 @@ export function getMeHandler(h: HandlerContext): Handler<Env> {
     if (!session) {
       throw new APIError(401, "invalid_session");
     }
-    const user = await getUser(h.db, session.userID);
+    const user = session.user ?? await getUser(h.db, session.userID);
     if (!user) {
       throw new APIError(404, "account_not_found");
     }
@@ -156,19 +159,17 @@ export function updateMeHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(400, "invalid_profile");
     }
     await using tx = await h.db.begin();
-    if (input.displayName !== null) {
-      await tx.exec(`UPDATE users SET display_name = $2, updated_at = clock_timestamp() WHERE id = $1`, session.userID, input.displayName);
-    }
-    if (input.bio !== null) {
-      await tx.exec(`UPDATE users SET bio = $2, updated_at = clock_timestamp() WHERE id = $1`, session.userID, input.bio);
-    }
-    if (input.region !== null) {
-      await tx.exec(`UPDATE users SET region = $2, updated_at = clock_timestamp() WHERE id = $1`, session.userID, input.region);
-    }
-    const user = await getUser(tx, session.userID);
-    if (!user) {
+    const row = await tx.get(
+      `UPDATE users SET display_name = COALESCE($2, display_name), bio = COALESCE($3, bio),
+                        region = COALESCE($4, region), updated_at = clock_timestamp()
+       WHERE id = $1 AND status = 'active' RETURNING ${userColumns.join(", ")}`,
+      session.userID, input.displayName, input.bio, input.region,
+    );
+    if (!row) {
       throw new APIError(404, "account_not_found");
     }
+    const user = userFromRow(row);
+    setImageKey(user);
     await tx.commit();
     return jsonResponse(c, 200, newGetMeResponse(user));
   };
