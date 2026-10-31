@@ -55,7 +55,10 @@ test("unposted feeds with PostgreSQL", { skip: !port }, async (t) => {
       },
       async select<T>(sql: string, ...args: unknown[]) {
         queries.push(sql);
-        return db.select<T>(sql, ...args);
+        const result = await db.select<T>(sql, ...args);
+        // friendsは投稿済み判定と候補取得を1 statementにまとめる。
+        if (sql.includes("WITH active_windows AS MATERIALIZED")) await afterPosted?.();
+        return result;
       },
     } as DB;
     const app = new Hono<Env>().onError(apiErrorHandler);
@@ -80,13 +83,17 @@ test("unposted feeds with PostgreSQL", { skip: !port }, async (t) => {
   }
   const feeds = ["friends", "friends-of-friends", "public", "following"];
   for (const feed of feeds) {
-    await t.test(`${feed}: unposted response is empty after only two queries`, async () => {
+    await t.test(`${feed}: unposted response avoids relationship and candidate loading`, async () => {
       const result = await request(`/feeds/${feed}`);
       assert.equal(result.status, 200);
       assert.deepEqual(result.body, { items: [], hasMore: false });
-      assert.equal(result.queries.length, 2);
-      assert.ok(result.queries[0].includes("FROM users"));
-      assert.ok(result.queries[1].includes("SELECT EXISTS"));
+      assert.equal(result.queries.length, feed === "friends" ? 1 : 2);
+      if (feed === "friends") {
+        assert.ok(result.queries[0].includes("WITH active_windows AS MATERIALIZED"));
+      } else {
+        assert.ok(result.queries[0].includes("FROM users"));
+        assert.ok(result.queries[1].includes("SELECT EXISTS"));
+      }
     });
   }
   for (const [label, change] of [
@@ -100,7 +107,7 @@ test("unposted feeds with PostgreSQL", { skip: !port }, async (t) => {
         const result = await request("/feeds/friends");
         assert.equal(result.status, 200);
         assert.deepEqual(result.body, { items: [], hasMore: false });
-        assert.equal(result.queries.length, 2);
+        assert.equal(result.queries.length, 1);
       } finally { await restore(); }
     });
   }
@@ -108,7 +115,7 @@ test("unposted feeds with PostgreSQL", { skip: !port }, async (t) => {
     try {
       const before = await request("/feeds/friends", () => createViewerPost());
       assert.deepEqual(before.body, { items: [], hasMore: false });
-      assert.equal(before.queries.length, 2);
+      assert.equal(before.queries.length, 1);
       const after = await request("/feeds/friends");
       assert.equal(after.status, 200);
       assert.deepEqual(after.body.items.map((item: { id: string }) => item.id), ["friend-post"]);

@@ -2,6 +2,7 @@ import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
 import type { Queryer } from "./db.ts";
+import { getFriendsFeed } from "./friends_feed.ts";
 import { canView, loadViewerContext, selectPostsWithAuthor, type Post, type PostWithAuthor, type ViewerContext } from "./post.ts";
 import { newPostResponse, type PostResponse } from "./post_api.ts";
 import { jsonResponse } from "./response.ts";
@@ -44,6 +45,9 @@ export function getFeedHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(400, "invalid_pagination");
     }
     const session = getSession(c)!;
+    if (input.feed === "friends") {
+      return jsonResponse(c, 200, await getFriendsFeed(h.db, session.userID, input.beforePostedAt, input.beforeId));
+    }
     const viewer = await loadViewerContext(h.db, session.userID, session.user, { requirePostedToday: true });
     if (!viewer) {
       const response: GetFeedResponse = { items: [], hasMore: false };
