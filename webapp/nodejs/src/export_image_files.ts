@@ -21,9 +21,10 @@ export async function exportImageFiles(db: DB, files: ImageFiles) {
       ${imageFileGenerationSQL} AS image_file_generation
     FROM image_objects i CROSS JOIN initial_data_boundary b`);
   for (;;) {
-    const rows = await tx.select<Image>("FETCH FORWARD 4 FROM image_export");
+    const rows = await tx.select<Image>("FETCH FORWARD 64 FROM image_export");
     if (!rows.length) break;
-    const writes = await Promise.allSettled(rows.map(async (row) => {
+    for (let start = 0; start < rows.length; start += 8) {
+    const writes = await Promise.allSettled(rows.slice(start, start + 8).map(async (row) => {
       const file = files.reference(row.image_file_generation, row.id, row.owner_user_id, row.created_at, row.image_version, row.media_type);
       if (!file) { result.unsupported++; return; }
       if (await files.has(file)) { result.existing++; return; }
@@ -33,6 +34,8 @@ export async function exportImageFiles(db: DB, files: ImageFiles) {
     }));
     const failed = writes.find((write) => write.status === "rejected");
     if (failed?.status === "rejected") throw failed.reason;
+    }
+    if ((result.written + result.existing + result.unsupported) % 6400 === 0) console.log(JSON.stringify({ progress: true, ...result }));
   }
   await tx.exec("CLOSE image_export");
   await tx.commit();
