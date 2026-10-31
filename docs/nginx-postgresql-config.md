@@ -2,6 +2,20 @@
 
 ## 終了前の追加変更：WAL容量（反映済み・ベンチ未検証）
 
+### 追加：非同期コミット（反映済み・ベンチ未検証）
+
+ユーザーから競技用の障害時リスクを許容する旨の指示を受け、
+`synchronous_commit=off`を追加する。fsync/full_page_writesはonを維持する。
+通常の読み取り可視性や正常停止時の書き出しは維持するが、クラッシュ直前の
+成功応答済み更新を失う可能性がある。通常再起動とクラッシュを区別する。
+本設定を競技規約で明示許可されたものとは扱わず、再起動後の取得は要確認。
+[PostgreSQL公式説明](https://www.postgresql.org/docs/16/runtime-config-wal.html#GUC-SYNCHRONOUS-COMMIT)。
+以下の「永続化3設定on」はWAL容量変更直後の観測値であり、この追加変更後とは異なる。
+asia2で元設定を同ディレクトリの `zzz-isureal-performance.conf.before-async-20261031`
+へ保存し、構文エラーがないことを確認してreload成功。別接続でsynchronous_commit=off、
+fsync/full_page_writes=on、max_wal_size=2048MB、pending_restart=false、DB activeを確認した。
+追加ベンチ・再起動試験は未実施。非同期コミットだけ戻す場合はこのバックアップを復元してreloadする。
+
 2026-10-31 17:35 JST、ブランチ `perf/pg-checkpoint-headroom`、起点 `053af6e`。
 asia2の読み取りでshared_buffers=512MB、effective_cache_size=2GB、work_mem=4MB、
 max_connections=100、max_wal_size=1GB、checkpoint_timeout=300秒、
