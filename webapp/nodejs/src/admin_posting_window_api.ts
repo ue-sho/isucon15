@@ -3,6 +3,7 @@ import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
 import { must } from "./db.ts";
+import { lockNotificationMembership } from "./notification_membership.ts";
 import { getPostingWindow } from "./posting_window.ts";
 import { jsonResponse } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
@@ -37,7 +38,7 @@ export function openPostingWindowHandler(h: HandlerContext): Handler<Env> {
       seconds = input.onTimeSeconds;
     }
     await using tx = await h.db.begin();
-    await tx.exec(`LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`);
+    await lockNotificationMembership(tx, true);
     const { exists: conflict } = must(
       await tx.get<{ exists: boolean }>(`SELECT EXISTS(SELECT 1 FROM posting_windows WHERE region = $1 AND local_date >= $2)`, region, localDate),
     );

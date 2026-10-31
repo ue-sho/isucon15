@@ -3,6 +3,7 @@ import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
 import type { Row } from "./db.ts";
+import { lockNotificationMembership } from "./notification_membership.ts";
 import { signedImageURL } from "./image_signature.ts";
 import { jsonResponse, noContent } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
@@ -70,6 +71,7 @@ export function registerHandler(h: HandlerContext): Handler<Env> {
     const secretKey = randomUUID();
     const userID = randomUUID();
     await using tx = await h.db.begin();
+    await lockNotificationMembership(tx);
     // 別SQLにして、ロック待機後の新しいスナップショットで重複を確認する。
     await tx.exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, input.username);
     const row = await tx.get<Row>(
@@ -159,6 +161,7 @@ export function updateMeHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(400, "invalid_profile");
     }
     await using tx = await h.db.begin();
+    if (input.region !== null) await lockNotificationMembership(tx);
     const row = await tx.get(
       `UPDATE users SET display_name = COALESCE($2, display_name), bio = COALESCE($3, bio),
                         region = COALESCE($4, region), updated_at = clock_timestamp()

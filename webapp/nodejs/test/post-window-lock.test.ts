@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import jpeg from "jpeg-js";
 import pg from "pg";
 import { openPostingWindowHandler } from "../src/admin_posting_window_api.ts";
+import { deleteAccountHandler } from "../src/account_deletion_api.ts";
 import { apiErrorHandler } from "../src/api_error.ts";
 import type { Config } from "../src/config.ts";
 import { DB, type Tx } from "../src/db.ts";
@@ -15,7 +16,7 @@ import { getFeedHandler } from "../src/feed_api.ts";
 import { IPBanList } from "../src/ip_ban.ts";
 import { createPostHandler, deletePostHandler } from "../src/post_api.ts";
 import type { Env } from "../src/server.ts";
-import { updateMeHandler } from "../src/user_api.ts";
+import { loginHandler, registerHandler, updateMeHandler } from "../src/user_api.ts";
 
 // Opt-in: starts its own disposable PG16 container, never accepts a database URL.
 const enabled = process.env.POST_WINDOW_LOCK_TEST === "1";
@@ -120,6 +121,9 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     app.delete("/api/posts/:postId", deletePostHandler(context));
     app.post("/api/admin/posting-window", openPostingWindowHandler(context));
     app.patch("/api/me", updateMeHandler(context));
+    app.post("/api/auth/register", registerHandler(context));
+    app.post("/api/auth/login", loginHandler(context));
+    app.delete("/api/me", deleteAccountHandler(context));
     app.get("/api/feeds/:feed", getFeedHandler(context));
     await control.query(`INSERT INTO users (id, username, secret_key_hash, display_name, region)
       VALUES ('alice', 'alice', repeat('0', 64), 'Alice', 'asia'), ('bob', 'bob', repeat('0', 64), 'Bob', 'asia')`);
@@ -157,9 +161,9 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
       body.set("location_kind", "none");
       return request("/api/posts", { method: "POST", body }, user);
     }
-    function open(localDate = "2026-11-01") {
+    function open(localDate = "2026-11-01", region = "asia") {
       return request("/api/admin/posting-window", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ region: "asia", localDate, onTimeSeconds: 3600 }) });
+        body: JSON.stringify({ region, localDate, onTimeSeconds: 3600 }) });
     }
     function move() {
       return request("/api/me", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: '{"region":"europe"}' });
@@ -191,6 +195,108 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     }
     return { db, control, config, request, post, open, move, gate, blocked, counts };
   }
+
+  await t.test("window opening does not block posts, login or non-region profile updates", async (st) => {
+    const f = await fixture(st);
+    await f.control.query("UPDATE users SET secret_key_hash=$1 WHERE id='alice'", [createHash("sha256").update("secret").digest("hex")]);
+    const gate = f.gate();
+    let held = false;
+    f.db.hook = (e) => {
+      if (e.phase === "after" && e.sql === "SELECT pg_advisory_xact_lock(20261031, 1)" && !held) {
+        held = true; return gate.hold(e);
+      }
+    };
+    const opening = f.open();
+    await within(gate.reached);
+    assert.equal((await within(f.post())).status, 201);
+    assert.equal((await within(f.request("/api/me", { method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: '{"displayName":"Updated"}' }))).status, 200);
+    assert.equal((await within(f.request("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: '{"username":"alice","secretKey":"secret"}' }))).status, 200);
+    gate.release();
+    assert.equal((await opening).status, 201);
+  });
+
+  for (const operation of ["register", "move", "delete"] as const) {
+    for (const first of ["window", "membership"] as const) {
+      await t.test(`${first} first serializes ${operation} with notification membership`, async (st) => {
+        const f = await fixture(st);
+        const gate = f.gate();
+        const waiting = Promise.withResolvers<QueryEvent>();
+        const exclusive = "SELECT pg_advisory_xact_lock(20261031, 1)";
+        const shared = "SELECT pg_advisory_xact_lock_shared(20261031, 1)";
+        let held = false;
+        f.db.hook = (e) => {
+          if (e.phase === "before" && e.sql === (first === "window" ? shared : exclusive)) waiting.resolve(e);
+          if (e.phase === "after" && e.sql === (first === "window" ? exclusive : shared) && !held) {
+            held = true; return gate.hold(e);
+          }
+        };
+        const mutate = () => operation === "move" ? f.move() : operation === "delete"
+          ? f.request("/api/me", { method: "DELETE" })
+          : f.request("/api/auth/register", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: '{"username":"carol","displayName":"Carol","region":"asia"}' });
+        const a = first === "window" ? f.open() : mutate();
+        const holder = await within(gate.reached);
+        const b = first === "window" ? mutate() : f.open();
+        await f.blocked((await within(waiting.promise)).pid, holder.pid);
+        gate.release();
+        const [ra, rb] = await Promise.all([a, b]);
+        const opened = first === "window" ? ra : rb;
+        const changed = first === "window" ? rb : ra;
+        assert.equal(opened.status, 201);
+        assert.equal(changed.status, operation === "register" ? 201 : operation === "delete" ? 204 : 200);
+        const { id } = await opened.json();
+        const recipients = (await f.control.query("SELECT user_id FROM notifications WHERE posting_window_id=$1 ORDER BY user_id", [id])).rows.map(r => r.user_id);
+        if (first === "window") assert.deepEqual(recipients, ["alice", "bob"]);
+        else if (operation === "register") {
+          assert.equal(recipients.length, 3);
+          assert.ok(recipients.includes("alice") && recipients.includes("bob"));
+        } else assert.deepEqual(recipients, ["bob"]);
+      });
+    }
+  }
+
+  await t.test("distinct registrations share membership lock without serializing each other", async (st) => {
+    const f = await fixture(st);
+    const gate = f.gate();
+    let held = false;
+    f.db.hook = (e) => {
+      if (e.phase === "after" && e.sql === "SELECT pg_advisory_xact_lock_shared(20261031, 1)" && !held) {
+        held = true; return gate.hold(e);
+      }
+    };
+    const register = (username: string) => f.request("/api/auth/register", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, displayName: username, region: "asia" }),
+    });
+    const first = register("carol");
+    await within(gate.reached);
+    assert.equal((await within(register("dave"))).status, 201);
+    gate.release();
+    assert.equal((await first).status, 201);
+  });
+
+  await t.test("notification failure rolls back period switch and releases advisory lock", async (st) => {
+    const f = await fixture(st);
+    await f.control.query(`CREATE FUNCTION reject_notification() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'synthetic notification failure'; END $$;
+      CREATE TRIGGER reject_notification BEFORE INSERT ON notifications FOR EACH ROW EXECUTE FUNCTION reject_notification()`);
+    assert.equal((await f.open()).status, 500);
+    assert.deepEqual((await f.control.query("SELECT id FROM posting_windows WHERE region='asia' AND ended_at IS NULL")).rows, [{ id: "asia-old" }]);
+    assert.equal((await f.control.query("SELECT count(*)::int AS n FROM notifications")).rows[0].n, 0);
+    await f.control.query("DROP TRIGGER reject_notification ON notifications");
+    assert.equal((await within(f.move())).status, 200);
+    assert.equal((await within(f.open())).status, 201);
+  });
+
+  await t.test("same-region concurrent openings serialize and duplicate date returns 409", async (st) => {
+    const f = await fixture(st);
+    const results = await Promise.all([f.open(), f.open()]);
+    assert.deepEqual(results.map(r => r.status).sort(), [201, 409]);
+    assert.equal((await f.open("2026-11-02")).status, 201);
+    assert.equal((await f.control.query("SELECT count(*)::int AS n FROM posting_windows WHERE region='asia' AND ended_at IS NULL")).rows[0].n, 1);
+  });
 
   await t.test("PG16: SHARE shares with SHARE but blocks non-key UPDATE; KEY SHARE does not", async (st) => {
     const f = await fixture(st);
