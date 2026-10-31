@@ -1,0 +1,1214 @@
+{
+  "schema_version": 1,
+  "collected_at": "2026-10-31T01:16:04.629700+00:00",
+  "hostname": "ip-192-168-4-10",
+  "hardware": {
+    "os": "Ubuntu 24.04.5 LTS",
+    "architecture": "x86_64",
+    "vcpus": 2,
+    "cpu_model": "Intel(R) Xeon(R) Platinum 8275CL CPU @ 3.00GHz",
+    "virtualization": "amazon",
+    "memory_bytes": 3974344704,
+    "swap_bytes": 0,
+    "root_disk": {
+      "total_bytes": 61285326848,
+      "used_bytes": 25485291520,
+      "available_bytes": 35783258112
+    }
+  },
+  "software": [
+    {
+      "name": "nginx",
+      "version": "nginx/1.24.0",
+      "path": "/usr/sbin/nginx",
+      "source": "installed"
+    },
+    {
+      "name": "psql",
+      "version": "psql (PostgreSQL) 16.15",
+      "path": "/usr/bin/psql",
+      "source": "installed"
+    },
+    {
+      "name": "node",
+      "version": "v26.12.1",
+      "path": "/home/isucon/local/node/bin/node",
+      "source": "installed"
+    }
+  ],
+  "processes": [
+    {
+      "name": "(sd-pam)",
+      "pids": [
+        4078
+      ]
+    },
+    {
+      "name": "ModemManager",
+      "pids": [
+        813
+      ]
+    },
+    {
+      "name": "acpid",
+      "pids": [
+        607
+      ]
+    },
+    {
+      "name": "agetty",
+      "pids": [
+        726,
+        794
+      ]
+    },
+    {
+      "name": "amazon-ssm-agen",
+      "pids": [
+        625
+      ]
+    },
+    {
+      "name": "chronyd",
+      "pids": [
+        712,
+        727
+      ]
+    },
+    {
+      "name": "cpuhp/0",
+      "pids": [
+        22
+      ]
+    },
+    {
+      "name": "cpuhp/1",
+      "pids": [
+        23
+      ]
+    },
+    {
+      "name": "cron",
+      "pids": [
+        611
+      ]
+    },
+    {
+      "name": "dbus-daemon",
+      "pids": [
+        612
+      ]
+    },
+    {
+      "name": "ecryptfs-kthread",
+      "pids": [
+        57
+      ]
+    },
+    {
+      "name": "idle_inject/0",
+      "pids": [
+        21
+      ]
+    },
+    {
+      "name": "idle_inject/1",
+      "pids": [
+        24
+      ]
+    },
+    {
+      "name": "irq/9-acpi",
+      "pids": [
+        45
+      ]
+    },
+    {
+      "name": "irqbalance",
+      "pids": [
+        618
+      ]
+    },
+    {
+      "name": "jbd2/nvme0n1p1-8",
+      "pids": [
+        81
+      ]
+    },
+    {
+      "name": "jbd2/nvme0n1p16-8",
+      "pids": [
+        265
+      ]
+    },
+    {
+      "name": "kauditd",
+      "pids": [
+        33
+      ]
+    },
+    {
+      "name": "kcompactd0",
+      "pids": [
+        39
+      ]
+    },
+    {
+      "name": "kdevtmpfs",
+      "pids": [
+        29
+      ]
+    },
+    {
+      "name": "khugepaged",
+      "pids": [
+        41
+      ]
+    },
+    {
+      "name": "khungtaskd",
+      "pids": [
+        34
+      ]
+    },
+    {
+      "name": "kprobe-optimizer",
+      "pids": [
+        20
+      ]
+    },
+    {
+      "name": "ksmd",
+      "pids": [
+        40
+      ]
+    },
+    {
+      "name": "ksoftirqd/0",
+      "pids": [
+        14
+      ]
+    },
+    {
+      "name": "ksoftirqd/1",
+      "pids": [
+        26
+      ]
+    },
+    {
+      "name": "kswapd0",
+      "pids": [
+        56
+      ]
+    },
+    {
+      "name": "kthreadd",
+      "pids": [
+        2
+      ]
+    },
+    {
+      "name": "kworker/0:0-cgroup_free",
+      "pids": [
+        1434
+      ]
+    },
+    {
+      "name": "kworker/0:0H-kblockd",
+      "pids": [
+        10
+      ]
+    },
+    {
+      "name": "kworker/0:1",
+      "pids": [
+        5356
+      ]
+    },
+    {
+      "name": "kworker/0:1H-kblockd",
+      "pids": [
+        193
+      ]
+    },
+    {
+      "name": "kworker/0:2",
+      "pids": [
+        5357
+      ]
+    },
+    {
+      "name": "kworker/0:4-mm_percpu_wq",
+      "pids": [
+        327
+      ]
+    },
+    {
+      "name": "kworker/1:0-mm_percpu_wq",
+      "pids": [
+        4058
+      ]
+    },
+    {
+      "name": "kworker/1:0H-kblockd",
+      "pids": [
+        28
+      ]
+    },
+    {
+      "name": "kworker/1:1",
+      "pids": [
+        5355
+      ]
+    },
+    {
+      "name": "kworker/1:1H-kblockd",
+      "pids": [
+        110
+      ]
+    },
+    {
+      "name": "kworker/1:2-cgwb_release",
+      "pids": [
+        64
+      ]
+    },
+    {
+      "name": "kworker/1:3-inode_switch_wbs",
+      "pids": [
+        146
+      ]
+    },
+    {
+      "name": "kworker/R-acpi_thermal_pm",
+      "pids": [
+        59
+      ]
+    },
+    {
+      "name": "kworker/R-ata_sff",
+      "pids": [
+        48
+      ]
+    },
+    {
+      "name": "kworker/R-blkcg_punt_bio",
+      "pids": [
+        43
+      ]
+    },
+    {
+      "name": "kworker/R-cfg80211",
+      "pids": [
+        472
+      ]
+    },
+    {
+      "name": "kworker/R-charger_manager",
+      "pids": [
+        80
+      ]
+    },
+    {
+      "name": "kworker/R-devfreq_wq",
+      "pids": [
+        53
+      ]
+    },
+    {
+      "name": "kworker/R-edac-poller",
+      "pids": [
+        52
+      ]
+    },
+    {
+      "name": "kworker/R-ena",
+      "pids": [
+        271
+      ]
+    },
+    {
+      "name": "kworker/R-ext4-rsv-conversion",
+      "pids": [
+        82,
+        266
+      ]
+    },
+    {
+      "name": "kworker/R-inet_frag_wq",
+      "pids": [
+        30
+      ]
+    },
+    {
+      "name": "kworker/R-ipv6_addrconf",
+      "pids": [
+        66
+      ]
+    },
+    {
+      "name": "kworker/R-kblockd",
+      "pids": [
+        42
+      ]
+    },
+    {
+      "name": "kworker/R-kintegrityd",
+      "pids": [
+        44
+      ]
+    },
+    {
+      "name": "kworker/R-kmpath_handlerd",
+      "pids": [
+        170
+      ]
+    },
+    {
+      "name": "kworker/R-kmpathd",
+      "pids": [
+        169
+      ]
+    },
+    {
+      "name": "kworker/R-kstrp",
+      "pids": [
+        67
+      ]
+    },
+    {
+      "name": "kworker/R-kthrotld",
+      "pids": [
+        58
+      ]
+    },
+    {
+      "name": "kworker/R-kvfree_rcu_reclaim",
+      "pids": [
+        6
+      ]
+    },
+    {
+      "name": "kworker/R-md_bitmap",
+      "pids": [
+        49
+      ]
+    },
+    {
+      "name": "kworker/R-md_llbitmap_io",
+      "pids": [
+        50
+      ]
+    },
+    {
+      "name": "kworker/R-md_llbitmap_unplug",
+      "pids": [
+        51
+      ]
+    },
+    {
+      "name": "kworker/R-mld",
+      "pids": [
+        65
+      ]
+    },
+    {
+      "name": "kworker/R-mm_percpu_wq",
+      "pids": [
+        13
+      ]
+    },
+    {
+      "name": "kworker/R-netns",
+      "pids": [
+        8
+      ]
+    },
+    {
+      "name": "kworker/R-nfit",
+      "pids": [
+        273
+      ]
+    },
+    {
+      "name": "kworker/R-nvme-auth-wq",
+      "pids": [
+        63
+      ]
+    },
+    {
+      "name": "kworker/R-nvme-delete-wq",
+      "pids": [
+        62
+      ]
+    },
+    {
+      "name": "kworker/R-nvme-reset-wq",
+      "pids": [
+        61
+      ]
+    },
+    {
+      "name": "kworker/R-nvme-wq",
+      "pids": [
+        60
+      ]
+    },
+    {
+      "name": "kworker/R-quota_events_unbound",
+      "pids": [
+        55
+      ]
+    },
+    {
+      "name": "kworker/R-rcu_gp",
+      "pids": [
+        4
+      ]
+    },
+    {
+      "name": "kworker/R-slub_flushwq",
+      "pids": [
+        7
+      ]
+    },
+    {
+      "name": "kworker/R-sync_wq",
+      "pids": [
+        5
+      ]
+    },
+    {
+      "name": "kworker/R-tls-strp",
+      "pids": [
+        1395
+      ]
+    },
+    {
+      "name": "kworker/R-tpm_dev_wq",
+      "pids": [
+        47
+      ]
+    },
+    {
+      "name": "kworker/R-writeback",
+      "pids": [
+        38
+      ]
+    },
+    {
+      "name": "kworker/u8:0-events_power_efficient",
+      "pids": [
+        12
+      ]
+    },
+    {
+      "name": "kworker/u8:1-flush-259:0",
+      "pids": [
+        36
+      ]
+    },
+    {
+      "name": "kworker/u8:2-events_power_efficient",
+      "pids": [
+        37
+      ]
+    },
+    {
+      "name": "kworker/u8:3-events_power_efficient",
+      "pids": [
+        147
+      ]
+    },
+    {
+      "name": "kworker/u9:0",
+      "pids": [
+        69
+      ]
+    },
+    {
+      "name": "migration/0",
+      "pids": [
+        19
+      ]
+    },
+    {
+      "name": "migration/1",
+      "pids": [
+        25
+      ]
+    },
+    {
+      "name": "multipathd",
+      "pids": [
+        187
+      ]
+    },
+    {
+      "name": "networkd-dispat",
+      "pids": [
+        620
+      ]
+    },
+    {
+      "name": "oom_reaper",
+      "pids": [
+        35
+      ]
+    },
+    {
+      "name": "packagekitd",
+      "pids": [
+        4403
+      ]
+    },
+    {
+      "name": "polkitd",
+      "pids": [
+        621
+      ]
+    },
+    {
+      "name": "pool_workqueue_release",
+      "pids": [
+        3
+      ]
+    },
+    {
+      "name": "postgres",
+      "pids": [
+        1196,
+        1197,
+        1198,
+        1200,
+        1201,
+        1202,
+        1626,
+        3648,
+        3800
+      ]
+    },
+    {
+      "name": "pr/ttyS0",
+      "pids": [
+        15
+      ]
+    },
+    {
+      "name": "ps",
+      "pids": [
+        5417
+      ]
+    },
+    {
+      "name": "psimon",
+      "pids": [
+        207,
+        4943
+      ]
+    },
+    {
+      "name": "python3",
+      "pids": [
+        5415
+      ]
+    },
+    {
+      "name": "rcu_exp_gp_kthread_worker",
+      "pids": [
+        18
+      ]
+    },
+    {
+      "name": "rcu_exp_par_gp_kthread_worker/0",
+      "pids": [
+        17
+      ]
+    },
+    {
+      "name": "rcu_sched",
+      "pids": [
+        16
+      ]
+    },
+    {
+      "name": "rcu_tasks_kthread",
+      "pids": [
+        31
+      ]
+    },
+    {
+      "name": "rcu_tasks_rude_kthread",
+      "pids": [
+        32
+      ]
+    },
+    {
+      "name": "rsyslogd",
+      "pids": [
+        673
+      ]
+    },
+    {
+      "name": "snapd",
+      "pids": [
+        627
+      ]
+    },
+    {
+      "name": "sshd",
+      "pids": [
+        645,
+        5358,
+        5414
+      ]
+    },
+    {
+      "name": "systemd",
+      "pids": [
+        1,
+        4077
+      ]
+    },
+    {
+      "name": "systemd-journal",
+      "pids": [
+        128
+      ]
+    },
+    {
+      "name": "systemd-logind",
+      "pids": [
+        631
+      ]
+    },
+    {
+      "name": "systemd-network",
+      "pids": [
+        538
+      ]
+    },
+    {
+      "name": "systemd-resolve",
+      "pids": [
+        424
+      ]
+    },
+    {
+      "name": "systemd-udevd",
+      "pids": [
+        191
+      ]
+    },
+    {
+      "name": "udisksd",
+      "pids": [
+        635
+      ]
+    },
+    {
+      "name": "unattended-upgr",
+      "pids": [
+        669
+      ]
+    },
+    {
+      "name": "watchdogd",
+      "pids": [
+        54
+      ]
+    }
+  ],
+  "services": [
+    "acpid.service",
+    "chrony.service",
+    "cron.service",
+    "dbus.service",
+    "getty@tty1.service",
+    "irqbalance.service",
+    "ModemManager.service",
+    "multipathd.service",
+    "networkd-dispatcher.service",
+    "packagekit.service",
+    "polkit.service",
+    "postgresql@16-main.service",
+    "rsyslog.service",
+    "serial-getty@ttyS0.service",
+    "snap.amazon-ssm-agent.amazon-ssm-agent.service",
+    "snapd.service",
+    "ssh.service",
+    "systemd-journald.service",
+    "systemd-logind.service",
+    "systemd-networkd.service",
+    "systemd-resolved.service",
+    "systemd-udevd.service",
+    "udisks2.service",
+    "unattended-upgrades.service",
+    "user@1100.service"
+  ],
+  "listening_ports": [
+    "udp UNCONN 0      0             127.0.0.54:53   0.0.0.0:*",
+    "udp UNCONN 0      0          127.0.0.53%lo:53   0.0.0.0:*",
+    "udp UNCONN 0      0      192.168.4.10%ens5:68   0.0.0.0:*",
+    "udp UNCONN 0      0              127.0.0.1:323  0.0.0.0:*",
+    "udp UNCONN 0      0                  [::1]:323     [::]:*",
+    "tcp LISTEN 0      200              0.0.0.0:5432 0.0.0.0:*",
+    "tcp LISTEN 0      4096       127.0.0.53%lo:53   0.0.0.0:*",
+    "tcp LISTEN 0      4096          127.0.0.54:53   0.0.0.0:*",
+    "tcp LISTEN 0      4096             0.0.0.0:22   0.0.0.0:*",
+    "tcp LISTEN 0      200                 [::]:5432    [::]:*",
+    "tcp LISTEN 0      4096                [::]:22      [::]:*"
+  ],
+  "nginx": {
+    "status": "ok",
+    "directives": [
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 2,
+        "directive": "listen",
+        "value": "80 default_server"
+      },
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 3,
+        "directive": "server_name",
+        "value": "_"
+      },
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 6,
+        "directive": "root",
+        "value": "/home/isucon/webapp/public"
+      },
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 8,
+        "directive": "location",
+        "value": "/api/"
+      },
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 10,
+        "directive": "proxy_pass",
+        "value": "http://127.0.0.1:8080"
+      },
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 13,
+        "directive": "location",
+        "value": "/"
+      }
+    ]
+  },
+  "mysql": {
+    "status": "not-found",
+    "tables": []
+  },
+  "postgresql": {
+    "status": "ok",
+    "version": "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+    "socket_directory": "/run/postgresql",
+    "port": 5432,
+    "databases": [
+      "isureal",
+      "postgres"
+    ],
+    "tables": [
+      {
+        "schema": "public",
+        "table": "administrator_sessions",
+        "estimated_rows": null,
+        "size_bytes": 32768,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "administrators",
+        "estimated_rows": null,
+        "size_bytes": 32768,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "block_relations",
+        "estimated_rows": 252,
+        "size_bytes": 163840,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "comments",
+        "estimated_rows": 546011,
+        "size_bytes": 168296448,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "follows",
+        "estimated_rows": 10034,
+        "size_bytes": 3809280,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "friend_requests",
+        "estimated_rows": 28981,
+        "size_bytes": 7233536,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "friendships",
+        "estimated_rows": 24994,
+        "size_bytes": 10543104,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202409",
+        "estimated_rows": null,
+        "size_bytes": 16384,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202410",
+        "estimated_rows": null,
+        "size_bytes": 172032,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202411",
+        "estimated_rows": 200,
+        "size_bytes": 696320,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202412",
+        "estimated_rows": 218,
+        "size_bytes": 729088,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202501",
+        "estimated_rows": 214,
+        "size_bytes": 770048,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202502",
+        "estimated_rows": 174,
+        "size_bytes": 622592,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202503",
+        "estimated_rows": 214,
+        "size_bytes": 729088,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202504",
+        "estimated_rows": 198,
+        "size_bytes": 671744,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202505",
+        "estimated_rows": 217,
+        "size_bytes": 729088,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202506",
+        "estimated_rows": 215,
+        "size_bytes": 720896,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202507",
+        "estimated_rows": 209,
+        "size_bytes": 696320,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202508",
+        "estimated_rows": 213,
+        "size_bytes": 712704,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202509",
+        "estimated_rows": 199,
+        "size_bytes": 688128,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202510",
+        "estimated_rows": 19054,
+        "size_bytes": 163209216,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202511",
+        "estimated_rows": 150273,
+        "size_bytes": 1270595584,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202512",
+        "estimated_rows": 153901,
+        "size_bytes": 1302847488,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202601",
+        "estimated_rows": 154984,
+        "size_bytes": 1309548544,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202602",
+        "estimated_rows": 141545,
+        "size_bytes": 1196376064,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202603",
+        "estimated_rows": 154867,
+        "size_bytes": 1311703040,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202604",
+        "estimated_rows": 150384,
+        "size_bytes": 1270079488,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202605",
+        "estimated_rows": 155262,
+        "size_bytes": 1311875072,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202606",
+        "estimated_rows": 149322,
+        "size_bytes": 1264779264,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202607",
+        "estimated_rows": 153703,
+        "size_bytes": 1302315008,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202608",
+        "estimated_rows": 154966,
+        "size_bytes": 1308368896,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202609",
+        "estimated_rows": 150783,
+        "size_bytes": 1273675776,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202610",
+        "estimated_rows": 135605,
+        "size_bytes": 1143504896,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_20261028",
+        "estimated_rows": 130,
+        "size_bytes": 67067904,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202611",
+        "estimated_rows": null,
+        "size_bytes": 16384,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202612",
+        "estimated_rows": null,
+        "size_bytes": 16384,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202701",
+        "estimated_rows": null,
+        "size_bytes": 16384,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202702",
+        "estimated_rows": null,
+        "size_bytes": 16384,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202703",
+        "estimated_rows": null,
+        "size_bytes": 16384,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202704",
+        "estimated_rows": null,
+        "size_bytes": 16384,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202705",
+        "estimated_rows": null,
+        "size_bytes": 16384,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_202706",
+        "estimated_rows": null,
+        "size_bytes": 16384,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "image_objects_default",
+        "estimated_rows": null,
+        "size_bytes": 16384,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "initial_block_relations",
+        "estimated_rows": 250,
+        "size_bytes": 65536,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "initial_data_boundary",
+        "estimated_rows": null,
+        "size_bytes": 8192,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "initial_follows",
+        "estimated_rows": 10020,
+        "size_bytes": 1613824,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "initial_friend_requests",
+        "estimated_rows": 28970,
+        "size_bytes": 4890624,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "initial_friendships",
+        "estimated_rows": 24985,
+        "size_bytes": 5275648,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "initial_users",
+        "estimated_rows": 5000,
+        "size_bytes": 1302528,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "ip_bans",
+        "estimated_rows": 45,
+        "size_bytes": 65536,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "login_sessions",
+        "estimated_rows": 256,
+        "size_bytes": 155648,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "notifications",
+        "estimated_rows": 1824946,
+        "size_bytes": 675135488,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "posting_windows",
+        "estimated_rows": 1095,
+        "size_bytes": 352256,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "posts",
+        "estimated_rows": 625111,
+        "size_bytes": 220758016,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "realmojis",
+        "estimated_rows": 1199348,
+        "size_bytes": 530145280,
+        "database": "isureal"
+      },
+      {
+        "schema": "public",
+        "table": "users",
+        "estimated_rows": 5000,
+        "size_bytes": 2367488,
+        "database": "isureal"
+      }
+    ],
+    "row_count_mode": "estimated"
+  },
+  "warnings": [],
+  "target": "asia2"
+}

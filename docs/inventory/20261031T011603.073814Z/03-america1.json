@@ -1,0 +1,1046 @@
+{
+  "schema_version": 1,
+  "collected_at": "2026-10-31T01:16:04.353139+00:00",
+  "hostname": "ip-192-168-3-10",
+  "hardware": {
+    "os": "Ubuntu 24.04.5 LTS",
+    "architecture": "x86_64",
+    "vcpus": 2,
+    "cpu_model": "Intel(R) Xeon(R) Platinum 8488C",
+    "virtualization": "amazon",
+    "memory_bytes": 3997413376,
+    "swap_bytes": 0,
+    "root_disk": {
+      "total_bytes": 61285326848,
+      "used_bytes": 25457741824,
+      "available_bytes": 35810807808
+    }
+  },
+  "software": [
+    {
+      "name": "nginx",
+      "version": "nginx/1.24.0",
+      "path": "/usr/sbin/nginx",
+      "source": "installed"
+    },
+    {
+      "name": "psql",
+      "version": "psql (PostgreSQL) 16.15",
+      "path": "/usr/bin/psql",
+      "source": "installed"
+    },
+    {
+      "name": "node",
+      "version": "v26.12.1",
+      "path": "/home/isucon/local/node/bin/node",
+      "source": "installed"
+    }
+  ],
+  "processes": [
+    {
+      "name": "(sd-pam)",
+      "pids": [
+        1530
+      ]
+    },
+    {
+      "name": "ModemManager",
+      "pids": [
+        802
+      ]
+    },
+    {
+      "name": "acpid",
+      "pids": [
+        646
+      ]
+    },
+    {
+      "name": "agetty",
+      "pids": [
+        711,
+        741
+      ]
+    },
+    {
+      "name": "amazon-ssm-agen",
+      "pids": [
+        662
+      ]
+    },
+    {
+      "name": "chronyd",
+      "pids": [
+        729,
+        742
+      ]
+    },
+    {
+      "name": "cpuhp/0",
+      "pids": [
+        22
+      ]
+    },
+    {
+      "name": "cpuhp/1",
+      "pids": [
+        23
+      ]
+    },
+    {
+      "name": "cron",
+      "pids": [
+        650
+      ]
+    },
+    {
+      "name": "dbus-daemon",
+      "pids": [
+        651
+      ]
+    },
+    {
+      "name": "ecryptfs-kthread",
+      "pids": [
+        56
+      ]
+    },
+    {
+      "name": "idle_inject/0",
+      "pids": [
+        21
+      ]
+    },
+    {
+      "name": "idle_inject/1",
+      "pids": [
+        24
+      ]
+    },
+    {
+      "name": "irq/24-pciehp",
+      "pids": [
+        58
+      ]
+    },
+    {
+      "name": "irq/25-pciehp",
+      "pids": [
+        59
+      ]
+    },
+    {
+      "name": "irq/26-pciehp",
+      "pids": [
+        60
+      ]
+    },
+    {
+      "name": "irq/27-pciehp",
+      "pids": [
+        61
+      ]
+    },
+    {
+      "name": "irq/28-pciehp",
+      "pids": [
+        62
+      ]
+    },
+    {
+      "name": "irq/29-pciehp",
+      "pids": [
+        63
+      ]
+    },
+    {
+      "name": "irq/30-pciehp",
+      "pids": [
+        64
+      ]
+    },
+    {
+      "name": "irq/31-pciehp",
+      "pids": [
+        65
+      ]
+    },
+    {
+      "name": "irq/32-pciehp",
+      "pids": [
+        66
+      ]
+    },
+    {
+      "name": "irq/33-pciehp",
+      "pids": [
+        67
+      ]
+    },
+    {
+      "name": "irq/34-pciehp",
+      "pids": [
+        68
+      ]
+    },
+    {
+      "name": "irq/35-pciehp",
+      "pids": [
+        69
+      ]
+    },
+    {
+      "name": "irq/36-pciehp",
+      "pids": [
+        70
+      ]
+    },
+    {
+      "name": "irq/37-pciehp",
+      "pids": [
+        71
+      ]
+    },
+    {
+      "name": "irq/38-pciehp",
+      "pids": [
+        72
+      ]
+    },
+    {
+      "name": "irq/39-pciehp",
+      "pids": [
+        73
+      ]
+    },
+    {
+      "name": "irq/40-pciehp",
+      "pids": [
+        74
+      ]
+    },
+    {
+      "name": "irq/41-pciehp",
+      "pids": [
+        75
+      ]
+    },
+    {
+      "name": "irq/42-pciehp",
+      "pids": [
+        76
+      ]
+    },
+    {
+      "name": "irq/43-pciehp",
+      "pids": [
+        77
+      ]
+    },
+    {
+      "name": "irq/44-pciehp",
+      "pids": [
+        78
+      ]
+    },
+    {
+      "name": "irq/45-pciehp",
+      "pids": [
+        79
+      ]
+    },
+    {
+      "name": "irq/46-pciehp",
+      "pids": [
+        80
+      ]
+    },
+    {
+      "name": "irq/47-pciehp",
+      "pids": [
+        81
+      ]
+    },
+    {
+      "name": "irq/48-pciehp",
+      "pids": [
+        82
+      ]
+    },
+    {
+      "name": "irq/49-pciehp",
+      "pids": [
+        83
+      ]
+    },
+    {
+      "name": "irq/50-pciehp",
+      "pids": [
+        84
+      ]
+    },
+    {
+      "name": "irq/51-pciehp",
+      "pids": [
+        85
+      ]
+    },
+    {
+      "name": "irq/52-pciehp",
+      "pids": [
+        86
+      ]
+    },
+    {
+      "name": "irq/53-pciehp",
+      "pids": [
+        87
+      ]
+    },
+    {
+      "name": "irq/54-pciehp",
+      "pids": [
+        88
+      ]
+    },
+    {
+      "name": "irq/55-pciehp",
+      "pids": [
+        89
+      ]
+    },
+    {
+      "name": "irq/56-pciehp",
+      "pids": [
+        90
+      ]
+    },
+    {
+      "name": "irq/57-pciehp",
+      "pids": [
+        91
+      ]
+    },
+    {
+      "name": "irq/58-pciehp",
+      "pids": [
+        92
+      ]
+    },
+    {
+      "name": "irq/59-pciehp",
+      "pids": [
+        93
+      ]
+    },
+    {
+      "name": "irq/60-pciehp",
+      "pids": [
+        94
+      ]
+    },
+    {
+      "name": "irq/61-pciehp",
+      "pids": [
+        95
+      ]
+    },
+    {
+      "name": "irq/9-acpi",
+      "pids": [
+        45
+      ]
+    },
+    {
+      "name": "irqbalance",
+      "pids": [
+        656
+      ]
+    },
+    {
+      "name": "isureal",
+      "pids": [
+        1502
+      ]
+    },
+    {
+      "name": "isureal-guard",
+      "pids": [
+        1300
+      ]
+    },
+    {
+      "name": "jbd2/nvme0n1p1-8",
+      "pids": [
+        122
+      ]
+    },
+    {
+      "name": "jbd2/nvme0n1p16-8",
+      "pids": [
+        335
+      ]
+    },
+    {
+      "name": "journalctl",
+      "pids": [
+        1411
+      ]
+    },
+    {
+      "name": "kauditd",
+      "pids": [
+        33
+      ]
+    },
+    {
+      "name": "kcompactd0",
+      "pids": [
+        39
+      ]
+    },
+    {
+      "name": "kdevtmpfs",
+      "pids": [
+        29
+      ]
+    },
+    {
+      "name": "khugepaged",
+      "pids": [
+        41
+      ]
+    },
+    {
+      "name": "khungtaskd",
+      "pids": [
+        34
+      ]
+    },
+    {
+      "name": "kprobe-optimizer",
+      "pids": [
+        20
+      ]
+    },
+    {
+      "name": "ksmd",
+      "pids": [
+        40
+      ]
+    },
+    {
+      "name": "ksoftirqd/0",
+      "pids": [
+        14
+      ]
+    },
+    {
+      "name": "ksoftirqd/1",
+      "pids": [
+        26
+      ]
+    },
+    {
+      "name": "kswapd0",
+      "pids": [
+        55
+      ]
+    },
+    {
+      "name": "kthreadd",
+      "pids": [
+        2
+      ]
+    },
+    {
+      "name": "kworker/0:0-cgroup_free",
+      "pids": [
+        9
+      ]
+    },
+    {
+      "name": "kworker/0:0H-kblockd",
+      "pids": [
+        10
+      ]
+    },
+    {
+      "name": "kworker/0:1-events",
+      "pids": [
+        11
+      ]
+    },
+    {
+      "name": "kworker/0:1H-kblockd",
+      "pids": [
+        234
+      ]
+    },
+    {
+      "name": "kworker/0:2",
+      "pids": [
+        2879
+      ]
+    },
+    {
+      "name": "kworker/1:0-cgroup_free",
+      "pids": [
+        1652
+      ]
+    },
+    {
+      "name": "kworker/1:0H-kblockd",
+      "pids": [
+        28
+      ]
+    },
+    {
+      "name": "kworker/1:1-cgroup_free",
+      "pids": [
+        106
+      ]
+    },
+    {
+      "name": "kworker/1:1H-kblockd",
+      "pids": [
+        151
+      ]
+    },
+    {
+      "name": "kworker/1:2-cgroup_free",
+      "pids": [
+        124
+      ]
+    },
+    {
+      "name": "kworker/R-acpi_thermal_pm",
+      "pids": [
+        96
+      ]
+    },
+    {
+      "name": "kworker/R-ata_sff",
+      "pids": [
+        47
+      ]
+    },
+    {
+      "name": "kworker/R-blkcg_punt_bio",
+      "pids": [
+        43
+      ]
+    },
+    {
+      "name": "kworker/R-cfg80211",
+      "pids": [
+        511
+      ]
+    },
+    {
+      "name": "kworker/R-charger_manager",
+      "pids": [
+        121
+      ]
+    },
+    {
+      "name": "kworker/R-devfreq_wq",
+      "pids": [
+        52
+      ]
+    },
+    {
+      "name": "kworker/R-edac-poller",
+      "pids": [
+        51
+      ]
+    },
+    {
+      "name": "kworker/R-ena",
+      "pids": [
+        294
+      ]
+    },
+    {
+      "name": "kworker/R-ext4-rsv-conversion",
+      "pids": [
+        123,
+        336
+      ]
+    },
+    {
+      "name": "kworker/R-inet_frag_wq",
+      "pids": [
+        30
+      ]
+    },
+    {
+      "name": "kworker/R-ipv6_addrconf",
+      "pids": [
+        104
+      ]
+    },
+    {
+      "name": "kworker/R-kblockd",
+      "pids": [
+        42
+      ]
+    },
+    {
+      "name": "kworker/R-kintegrityd",
+      "pids": [
+        44
+      ]
+    },
+    {
+      "name": "kworker/R-kmpath_handlerd",
+      "pids": [
+        210
+      ]
+    },
+    {
+      "name": "kworker/R-kmpathd",
+      "pids": [
+        209
+      ]
+    },
+    {
+      "name": "kworker/R-kstrp",
+      "pids": [
+        105
+      ]
+    },
+    {
+      "name": "kworker/R-kthrotld",
+      "pids": [
+        57
+      ]
+    },
+    {
+      "name": "kworker/R-kvfree_rcu_reclaim",
+      "pids": [
+        6
+      ]
+    },
+    {
+      "name": "kworker/R-md_bitmap",
+      "pids": [
+        48
+      ]
+    },
+    {
+      "name": "kworker/R-md_llbitmap_io",
+      "pids": [
+        49
+      ]
+    },
+    {
+      "name": "kworker/R-md_llbitmap_unplug",
+      "pids": [
+        50
+      ]
+    },
+    {
+      "name": "kworker/R-mld",
+      "pids": [
+        103
+      ]
+    },
+    {
+      "name": "kworker/R-mm_percpu_wq",
+      "pids": [
+        13
+      ]
+    },
+    {
+      "name": "kworker/R-netns",
+      "pids": [
+        8
+      ]
+    },
+    {
+      "name": "kworker/R-nfit",
+      "pids": [
+        319
+      ]
+    },
+    {
+      "name": "kworker/R-nvme-auth-wq",
+      "pids": [
+        100
+      ]
+    },
+    {
+      "name": "kworker/R-nvme-delete-wq",
+      "pids": [
+        99
+      ]
+    },
+    {
+      "name": "kworker/R-nvme-reset-wq",
+      "pids": [
+        98
+      ]
+    },
+    {
+      "name": "kworker/R-nvme-wq",
+      "pids": [
+        97
+      ]
+    },
+    {
+      "name": "kworker/R-quota_events_unbound",
+      "pids": [
+        54
+      ]
+    },
+    {
+      "name": "kworker/R-rcu_gp",
+      "pids": [
+        4
+      ]
+    },
+    {
+      "name": "kworker/R-slub_flushwq",
+      "pids": [
+        7
+      ]
+    },
+    {
+      "name": "kworker/R-sync_wq",
+      "pids": [
+        5
+      ]
+    },
+    {
+      "name": "kworker/R-tls-strp",
+      "pids": [
+        1484
+      ]
+    },
+    {
+      "name": "kworker/R-tpm_dev_wq",
+      "pids": [
+        46
+      ]
+    },
+    {
+      "name": "kworker/R-writeback",
+      "pids": [
+        38
+      ]
+    },
+    {
+      "name": "kworker/u8:0-events_power_efficient",
+      "pids": [
+        2415
+      ]
+    },
+    {
+      "name": "kworker/u8:1-events_unbound",
+      "pids": [
+        36
+      ]
+    },
+    {
+      "name": "kworker/u8:2-flush-259:0",
+      "pids": [
+        37
+      ]
+    },
+    {
+      "name": "kworker/u8:3-ext4-rsv-conversion",
+      "pids": [
+        107
+      ]
+    },
+    {
+      "name": "kworker/u9:0",
+      "pids": [
+        109
+      ]
+    },
+    {
+      "name": "migration/0",
+      "pids": [
+        19
+      ]
+    },
+    {
+      "name": "migration/1",
+      "pids": [
+        25
+      ]
+    },
+    {
+      "name": "multipathd",
+      "pids": [
+        226
+      ]
+    },
+    {
+      "name": "networkd-dispat",
+      "pids": [
+        659
+      ]
+    },
+    {
+      "name": "nginx",
+      "pids": [
+        1244,
+        1245,
+        1246
+      ]
+    },
+    {
+      "name": "oom_reaper",
+      "pids": [
+        35
+      ]
+    },
+    {
+      "name": "packagekitd",
+      "pids": [
+        1952
+      ]
+    },
+    {
+      "name": "polkitd",
+      "pids": [
+        660
+      ]
+    },
+    {
+      "name": "pool_workqueue_release",
+      "pids": [
+        3
+      ]
+    },
+    {
+      "name": "pr/ttyS0",
+      "pids": [
+        15
+      ]
+    },
+    {
+      "name": "ps",
+      "pids": [
+        2939
+      ]
+    },
+    {
+      "name": "psimon",
+      "pids": [
+        249,
+        2466
+      ]
+    },
+    {
+      "name": "python3",
+      "pids": [
+        2937
+      ]
+    },
+    {
+      "name": "rcu_exp_gp_kthread_worker",
+      "pids": [
+        18
+      ]
+    },
+    {
+      "name": "rcu_exp_par_gp_kthread_worker/0",
+      "pids": [
+        17
+      ]
+    },
+    {
+      "name": "rcu_sched",
+      "pids": [
+        16
+      ]
+    },
+    {
+      "name": "rcu_tasks_kthread",
+      "pids": [
+        31
+      ]
+    },
+    {
+      "name": "rcu_tasks_rude_kthread",
+      "pids": [
+        32
+      ]
+    },
+    {
+      "name": "rsyslogd",
+      "pids": [
+        735
+      ]
+    },
+    {
+      "name": "snapd",
+      "pids": [
+        666
+      ]
+    },
+    {
+      "name": "sshd",
+      "pids": [
+        681,
+        2880,
+        2936
+      ]
+    },
+    {
+      "name": "systemd",
+      "pids": [
+        1,
+        1529
+      ]
+    },
+    {
+      "name": "systemd-journal",
+      "pids": [
+        169
+      ]
+    },
+    {
+      "name": "systemd-logind",
+      "pids": [
+        669
+      ]
+    },
+    {
+      "name": "systemd-network",
+      "pids": [
+        577
+      ]
+    },
+    {
+      "name": "systemd-resolve",
+      "pids": [
+        430
+      ]
+    },
+    {
+      "name": "systemd-udevd",
+      "pids": [
+        230
+      ]
+    },
+    {
+      "name": "udisksd",
+      "pids": [
+        671
+      ]
+    },
+    {
+      "name": "unattended-upgr",
+      "pids": [
+        730
+      ]
+    },
+    {
+      "name": "watchdogd",
+      "pids": [
+        53
+      ]
+    }
+  ],
+  "services": [
+    "acpid.service",
+    "chrony.service",
+    "cron.service",
+    "dbus.service",
+    "getty@tty1.service",
+    "irqbalance.service",
+    "isureal-go.service",
+    "isureal-guard.service",
+    "ModemManager.service",
+    "multipathd.service",
+    "networkd-dispatcher.service",
+    "nginx.service",
+    "packagekit.service",
+    "polkit.service",
+    "rsyslog.service",
+    "serial-getty@ttyS0.service",
+    "snap.amazon-ssm-agent.amazon-ssm-agent.service",
+    "snapd.service",
+    "ssh.service",
+    "systemd-journald.service",
+    "systemd-logind.service",
+    "systemd-networkd.service",
+    "systemd-resolved.service",
+    "systemd-udevd.service",
+    "udisks2.service",
+    "unattended-upgrades.service",
+    "user@1100.service"
+  ],
+  "listening_ports": [
+    "udp UNCONN 0      0                127.0.0.54:53   0.0.0.0:*",
+    "udp UNCONN 0      0             127.0.0.53%lo:53   0.0.0.0:*",
+    "udp UNCONN 0      0      192.168.3.10%enp39s0:68   0.0.0.0:*",
+    "udp UNCONN 0      0                 127.0.0.1:323  0.0.0.0:*",
+    "udp UNCONN 0      0                     [::1]:323     [::]:*",
+    "tcp LISTEN 0      511                 0.0.0.0:80   0.0.0.0:*",
+    "tcp LISTEN 0      4096                0.0.0.0:22   0.0.0.0:*",
+    "tcp LISTEN 0      4096             127.0.0.54:53   0.0.0.0:*",
+    "tcp LISTEN 0      4096          127.0.0.53%lo:53   0.0.0.0:*",
+    "tcp LISTEN 0      4096                   [::]:22      [::]:*",
+    "tcp LISTEN 0      4096                      *:8080       *:*"
+  ],
+  "nginx": {
+    "status": "ok",
+    "directives": [
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 2,
+        "directive": "listen",
+        "value": "80 default_server"
+      },
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 3,
+        "directive": "server_name",
+        "value": "_"
+      },
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 6,
+        "directive": "root",
+        "value": "/home/isucon/webapp/public"
+      },
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 8,
+        "directive": "location",
+        "value": "/api/"
+      },
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 10,
+        "directive": "proxy_pass",
+        "value": "http://127.0.0.1:8080"
+      },
+      {
+        "file": "/etc/nginx/sites-enabled/isureal.conf",
+        "line": 13,
+        "directive": "location",
+        "value": "/"
+      }
+    ]
+  },
+  "mysql": {
+    "status": "not-found",
+    "tables": []
+  },
+  "postgresql": {
+    "status": "unavailable",
+    "databases": [],
+    "tables": []
+  },
+  "warnings": [
+    "ローカルPostgreSQLに接続できませんでした（socket・既存の認証設定・権限を確認してください）。"
+  ],
+  "target": "america1"
+}
