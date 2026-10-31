@@ -156,3 +156,5 @@ fa082c1取り込み後: npm run check成功。page-response・image-signature-ca
 本PR固有のDDLはない。ただし取り込んだmainの前提として、image_signature_cache_stateテーブルとinitial_data_boundary.image_cache_generation列が必要。既存の適用記録は他変更のdocsを参照し、反映前に存在を読み取り確認する。適用済みmigrationを無条件に再実行しない。
 
 最終main `2c9e2fd` 取り込み後も型検査成功、関連テスト47成功・1 opt-in skip、Memories専用実PGテスト1成功・0skipを確認した（回帰確認は約19秒）。最後の単回API応答比較はキャッシュ状態をそろえた性能ベンチではないため、性能の表には使っていない。最終 `memory_api.ts` のSHA-256は `cc89d9922a202cbe7d1d40aacc7ce2dcc3b2818bf0ea6823d1d643742b1963b2`。
+
+PR作成直前にmainが更新されたため、認証情報再利用を含む `14a59290088ecb809cbb93356414a9b366deeb92` も取り込んだ。これを最終取り込みmainとする。再度型検査成功、関連テスト47成功・1 opt-in skip、Memories専用実PGテスト1成功・0skip（約19秒）を確認。MemoriesのSQL・署名処理・スキーマはこの追加取り込みで変わっていないが、認証SQLは変更されたため、上表のAPI性能はfa082c1時点の比較値として扱い、最終headの性能を再計測したとはしない。

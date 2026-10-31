@@ -44,10 +44,11 @@ export function getFeedHandler(h: HandlerContext): Handler<Env> {
     if (ranked && (input.beforeScore === null) !== (input.beforeId === "")) {
       throw new APIError(400, "invalid_pagination");
     }
+    const session = getSession(c)!;
     if (input.feed === "friends") {
-      return jsonResponse(c, 200, await getFriendsFeed(h.db, getSession(c)!.userID, input.beforePostedAt, input.beforeId));
+      return jsonResponse(c, 200, await getFriendsFeed(h.db, session.userID, input.beforePostedAt, input.beforeId));
     }
-    const viewer = await loadViewerContext(h.db, getSession(c)!.userID, { requirePostedToday: true });
+    const viewer = await loadViewerContext(h.db, session.userID, session.user, { requirePostedToday: true });
     if (!viewer) {
       const response: GetFeedResponse = { items: [], hasMore: false };
       return jsonResponse(c, 200, response);

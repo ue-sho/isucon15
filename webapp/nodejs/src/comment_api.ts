@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
-import { canComment, getComment, selectCommentsWithAuthor, type Comment } from "./comment.ts";
-import { must } from "./db.ts";
+import { canComment, commentFromRow, selectCommentsWithAuthor, type Comment } from "./comment.ts";
+import { must, type Row } from "./db.ts";
 import { getPost } from "./post.ts";
 import { maxID, minID } from "./relationship.ts";
 import type { RelationshipUserResponse } from "./relationship_list_api.ts";
@@ -49,8 +49,8 @@ export function createCommentHandler(h: HandlerContext): Handler<Env> {
       throw new APIError(403, "interaction_forbidden");
     }
     const id = randomUUID();
-    await tx.exec(`INSERT INTO comments(id,post_id,author_id,body,created_at) VALUES($1,$2,$3,$4,clock_timestamp())`, id, post.id, actor, input.body);
-    const comment = must(await getComment(tx, id));
+    const row = must(await tx.get<Row>(`INSERT INTO comments(id,post_id,author_id,body,created_at) VALUES($1,$2,$3,$4,clock_timestamp()) RETURNING id,post_id,author_id,body,created_at,deleted_at`, id, post.id, actor, input.body));
+    const comment = commentFromRow(row);
     const user = must(await getUser(tx, actor));
     await tx.commit();
     return jsonResponse(c, 201, newCommentResponse(comment, user));

@@ -166,7 +166,7 @@ test("Memories interactions: real PostgreSQL equivalence, row counts and plans",
   const schema = `memories_test_${process.pid}`;
   let createdSchema = false;
   const report: Row = {
-    node: process.version, base: process.env.MEMORIES_BASE_SHA ?? "2c9e2fd786f4898e484fc29077f3d920ca2cb4d2", productionDistribution: "unverified",
+    node: process.version, base: process.env.MEMORIES_BASE_SHA ?? "14a59290088ecb809cbb93356414a9b366deeb92", productionDistribution: "unverified",
     sqlSamples: 8, sqlWarmups: 2, explainSamples: 6, explainWarmups: 1, explainTiming: false,
     apiSamples: process.env.MEMORIES_PG_BENCHMARK ? 4 : 1,
     apiTiming: "in-process Hono request through authentication, region check, handler and response body; no HTTP network",

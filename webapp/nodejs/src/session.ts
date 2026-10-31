@@ -1,12 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Context, MiddlewareHandler } from "hono";
 import { APIError } from "./api_error.ts";
-import { must, type DB, type Queryer, type Tx } from "./db.ts";
+import { must, type DB, type Tx } from "./db.ts";
+import { setImageKey, userColumnsAs, userFromRow, type User } from "./user.ts";
 import { withImageSignatureCacheGeneration } from "./image_signature.ts";
 import { logWarn } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
 
 export type Session = {
+  // 認証したリクエスト内だけで利用する。書込Txのロック後読取には使わない。
+  user?: User;
   region: string;
   token: string;
   userID: string;
@@ -37,7 +40,7 @@ async function getSessionFromHeader(c: Context<Env>, db: DB): Promise<{ session:
   const tokenHash = sha256Hex(token);
   const row = await db.get(
     `
-		SELECT s.user_id, s.token_hash, s.created_at, u.region,
+		SELECT s.user_id, s.token_hash, s.created_at, ${userColumnsAs("u", "user")},
       (SELECT generation::text FROM image_signature_cache_state WHERE singleton) AS signature_cache_generation
 		FROM login_sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
@@ -48,8 +51,10 @@ async function getSessionFromHeader(c: Context<Env>, db: DB): Promise<{ session:
   if (!row) {
     return null;
   }
+  const user = userFromRow(row, "user");
+  setImageKey(user);
   return {
-    session: { region: row.region, token: "", userID: row.user_id, tokenHash: row.token_hash, createdAt: row.created_at },
+    session: { user, region: user.region, token: "", userID: row.user_id, tokenHash: row.token_hash, createdAt: row.created_at },
     generation: row.signature_cache_generation,
   };
 }
@@ -92,38 +97,30 @@ export async function createLoginSession(db: DB, userID: string): Promise<Sessio
 }
 
 export async function createLoginSessionTx(tx: Tx, userID: string): Promise<Session> {
+  must(await tx.get(`SELECT id FROM users WHERE id = $1 AND status = 'active' FOR NO KEY UPDATE`, userID));
+  return createLoginSessionForLockedUserTx(tx, userID);
+}
+
+// 呼出し元が同じTxでactiveユーザーをFOR NO KEY UPDATE済みの場合だけ使用する。
+export async function createLoginSessionForLockedUserTx(tx: Tx, userID: string): Promise<Session> {
   const randomToken = randomUUID();
   const tokenHash = sha256Hex(randomToken);
-  must(await tx.get(`SELECT id FROM users WHERE id = $1 AND status = 'active' FOR NO KEY UPDATE`, userID));
-  await tx.exec(
-    `
-  UPDATE login_sessions
-  SET active = false, invalidated_at = clock_timestamp(), reason = 'replaced'
-  WHERE user_id = $1 AND active = true
- `,
-    userID,
-  );
   const sessionID = randomUUID();
-  await tx.exec(
+  const row = must(await tx.get<{ user_id: string; token_hash: string; created_at: Temporal.Instant }>(
     `
+  WITH invalidated AS (
+    UPDATE login_sessions
+    SET active = false, invalidated_at = clock_timestamp(), reason = 'replaced'
+    WHERE user_id = $2 AND active = true
+    RETURNING id
+  )
   INSERT INTO login_sessions (id, user_id, token_hash)
-  VALUES ($1, $2, $3)
+  SELECT $1, $2, $3 FROM (SELECT count(*) FROM invalidated) AS completed
+  RETURNING user_id, token_hash, created_at
  `,
     sessionID,
     userID,
     tokenHash,
-  );
-  const session = await getLoginSession(tx, sessionID);
-  session.token = randomToken;
-  return session;
-}
-
-async function getLoginSession(db: Queryer, sessionID: string): Promise<Session> {
-  const row = must(
-    await db.get<{ user_id: string; token_hash: string; created_at: Temporal.Instant }>(
-      `SELECT user_id, token_hash, created_at FROM login_sessions WHERE id = $1`,
-      sessionID,
-    ),
-  );
-  return { region: "", token: "", userID: row.user_id, tokenHash: row.token_hash, createdAt: row.created_at };
+  ));
+  return { region: "", token: randomToken, userID: row.user_id, tokenHash: row.token_hash, createdAt: row.created_at };
 }
