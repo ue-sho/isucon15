@@ -92,6 +92,9 @@ def remote_deploy(config, host):
             log = Path(config.require(key))
             if config.sudo('test', '-e', log, check=False).returncode == 0:
                 config.sudo('truncate', '-s', '0', log)
+                # PostgreSQLログはpostgresグループ経由で読み、0640を維持する。
+                if key == 'SLOW_LOG' and db_service.startswith('postgresql'):
+                    continue
                 config.sudo('chmod', '+r', log)
                 config.sudo('chmod', '+rx', log.parent)
         step = 'record'

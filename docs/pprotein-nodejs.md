@@ -61,3 +61,13 @@ PostgreSQLのSQL計測は別途対応が必要。登録済みslowlogはMySQL向�
 検証は`npm run check`と`npm test`（webapp/nodejs内）を実行。型チェックと4件のテストが成功し、有効時の要求、無効時の抑止、応答待ちによるブロックがないこと、接続失敗時にthrowしないことを確認した。依存導入は`npm ci --no-audit --no-fund`で実施。実環境での収集開始・初期化・デプロイは未実行。反映後、次のベンチの初期化でgroupが作成されることを確認する必要がある。
 
 戻す場合はinitializeハンドラの呼び出しを除去するか、`PPROTEIN_ENABLED=0`をサービスに反映する。
+
+## slowlog収集先の修正
+
+2026-10-31、pproteinで`failed to open /var/log/mysql/mysql-slow.log`が発生。実環境のasia2のagentは旧MySQLパスと`SupplementaryGroups=adm`のままだった。4台ともPostgreSQLクラスタはactiveで、`/var/log/postgresql/postgresql-slow.log`が存在し、所有者postgres:postgres、権限0640であることを読み取り確認した。
+
+4台のagentユニットと共通`SLOW_LOG`をPostgreSQLのログパスに変更し、agentの補助グループへpostgresを追加。設定生成処理もPostgreSQL設定ディレクトリがあるホストでは同グループを生成する。デプロイ時のPostgreSQLログ処理ではtruncateのみ行い、chmodで読み取り権限を広げない。
+
+変更はPR #21に追加。実環境への配置・agent再起動は未実行なので、反映前は同じエラーが続く。PostgreSQLログの収集成功とpprotein UIでの解析成功は別であり、解析モードの対応は未完了。戻す場合はagentユニットとSLOW_LOGを以前の値へ戻してデプロイする。
+
+検証：Python unittest 114件成功。PostgreSQL向けagent生成と、デプロイ時にログの0640が維持されることを追加テストで確認した。

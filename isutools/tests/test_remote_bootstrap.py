@@ -122,6 +122,15 @@ class RemoteDeployTests(Sandbox):
         self.assertEqual((self.logs / 'nginx/access.log').stat().st_size, 0)
         self.assertEqual((self.logs / 'mysql/slow.log').stat().st_size, 0)
 
+    def test_postgresql_log_permissions_are_preserved(self):
+        with (self.work / 'isutools/config.env').open('a') as file:
+            file.write('DB_SERVICE=postgresql@16-main.service\n')
+        log = self.logs / 'mysql/slow.log'
+        log.chmod(0o640)
+        self.deploy()
+        self.assertEqual(log.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(log.stat().st_size, 0)
+
     def test_log_checks_do_not_stat_as_unprivileged_user(self):
         from unittest.mock import patch
         from isutools.lib.remote import remote_deploy
