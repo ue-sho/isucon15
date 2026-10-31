@@ -4,6 +4,8 @@
 [担当Issue #13](https://github.com/ue-sho/isucon15/issues/13)、
 [全体調査 #11](https://github.com/ue-sho/isucon15/issues/11)。
 
+**初期化対応の追補:** 初版PR #32の残件だった全リージョン・全workerの署名キャッシュ無効化は、[DB世代による初期化](image-signature-cache-initialize.md)を参照。以下の作業状態・計測値・未実装事項は初版の記録であり、追補版の状態とは区別する。
+
 ## 作業状態
 
 - ブランチ: perf/image-signature-cache
