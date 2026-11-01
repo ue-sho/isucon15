@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { apiErrorHandler } from "../src/api_error.ts";
-import type { Row } from "../src/db.ts";
+import { DB, type Row } from "../src/db.ts";
 import { getNotificationsHandler } from "../src/notification_api.ts";
 import { getMyCurrentPostHandler } from "../src/post_api.ts";
 import type { Env, HandlerContext } from "../src/server.ts";
@@ -17,7 +17,8 @@ function appFor(db: object) {
   });
   const h = { db } as HandlerContext;
   app.get("/current", getMyCurrentPostHandler(h));
-  app.get("/notifications", getNotificationsHandler(h));
+  app.get("/notifications", getNotificationsHandler(h,
+    (wake) => db instanceof DB ? db.createNotificationWakeup(wake) : { start() {}, stop() {} }));
   return app;
 }
 

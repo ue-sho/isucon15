@@ -6,14 +6,16 @@ import { getNotificationsHandler } from "../src/notification_api.ts";
 import type { Env, HandlerContext } from "../src/server.ts";
 
 const stamp = Temporal.Instant.from("2026-10-31T02:00:00Z");
-function setup(select: (sql: string, users: string[], times: string[], regions: string[]) => Promise<object[]>) {
+function setup(select: (sql: string, users: string[], times: string[], regions: string[]) => Promise<object[]>,
+  createWakeup = (_wake: () => void) => ({ start() {}, stop() {} }),
+) {
   const db = { get: async () => ({ clock_timestamp: stamp }), select };
   const app = new Hono<Env>();
   app.use("*", async (c, next) => {
     c.set("session", { userID: c.req.header("user") ?? "viewer", region: "asia", token: "", tokenHash: "", createdAt: stamp });
     await next();
   });
-  app.get("/", getNotificationsHandler({ db } as unknown as HandlerContext));
+  app.get("/", getNotificationsHandler({ db } as unknown as HandlerContext, createWakeup));
   return app;
 }
 function notification(slot: number, user: string) {
@@ -91,4 +93,59 @@ test("待機中の接続がすべて切断されたらpollを止める", async (
   await response.body!.cancel();
   await sleep(550);
   assert.equal(queries, 1);
+});
+
+test("commit起床で既存timerを早め、poll実行中の多重起床は次の1巡へまとめる", async () => {
+  let wake!: () => void;
+  let active = false;
+  let queries = 0;
+  let running = 0;
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const app = setup(async (_sql, users) => {
+    assert.equal(++running, 1);
+    const iteration = ++queries;
+    if (iteration === 1) {
+      started.resolve();
+      await release.promise;
+    }
+    running--;
+    return users.map((user, slot) => iteration === 1 ? { slot, user_id: user, id: null } : notification(slot, user));
+  }, (callback) => {
+    wake = callback;
+    return { start() { active = true; }, stop() { active = false; } };
+  });
+  const response = await app.request("/");
+  await started.promise;
+  assert.equal(active, true);
+  for (let i = 0; i < 50; i++) wake();
+  await sleep(550);
+  assert.equal(queries, 1);
+  release.resolve();
+  const body = await response.text();
+  assert.equal((body.match(/data:/g) ?? []).length, 1);
+  assert.equal(queries, 2);
+  assert.equal(active, false);
+  wake();
+  await sleep(550);
+  assert.equal(queries, 2);
+});
+
+test("通常poll待機中の起床は500msを待たず配送し、切断後はtimerを残さない", async () => {
+  let wake!: () => void;
+  let queries = 0;
+  const first = Promise.withResolvers<void>();
+  const app = setup(async (_sql, users) => {
+    queries++;
+    first.resolve();
+    return users.map((user, slot) => queries === 1 ? { slot, user_id: user, id: null } : notification(slot, user));
+  }, (callback) => { wake = callback; return { start() {}, stop() {} }; });
+  const response = await app.request("/");
+  await first.promise;
+  await sleep(20);
+  const at = performance.now();
+  wake();
+  assert.match(await response.text(), /notification-viewer/);
+  assert.ok(performance.now() - at < 300);
+  assert.equal(queries, 2);
 });
