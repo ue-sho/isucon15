@@ -14,16 +14,19 @@ import type { Config } from "../src/config.ts";
 import { DB, type Tx } from "../src/db.ts";
 import { getFeedHandler } from "../src/feed_api.ts";
 import { IPBanList } from "../src/ip_ban.ts";
+import { decodeJPEG } from "../src/jpeg.ts";
 import { createPostHandler, deletePostHandler } from "../src/post_api.ts";
 import type { Env } from "../src/server.ts";
 import { loginHandler, registerHandler, updateMeHandler } from "../src/user_api.ts";
+import { legacyCreatePostHandler } from "./fixtures/post-create-legacy.ts";
 
 // Opt-in: starts its own disposable PG16 container, never accepts a database URL.
 const enabled = process.env.POST_WINDOW_LOCK_TEST === "1";
 const docker = promisify(execFile);
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-const isWindowSelect = (sql: string) => sql.startsWith("SELECT id, local_date, starts_at FROM posting_windows");
-const isUserLock = (sql: string) => sql.startsWith("SELECT id") && sql.includes("FROM users") && sql.includes("FOR NO KEY UPDATE");
+const isPrepare = (sql: string) => sql === "SELECT * FROM public.isureal_prepare_post($1)";
+const isPostSave = (sql: string) => sql.includes("WITH image AS (");
+const isUserLock = (sql: string) => isPrepare(sql) || sql.startsWith("SELECT id") && sql.includes("FROM users") && sql.includes("FOR NO KEY UPDATE");
 const isWindowEnd = (sql: string) => sql.startsWith("UPDATE posting_windows SET ended_at");
 
 async function within<T>(promise: PromiseLike<T>, message = "operation timed out"): Promise<T> {
@@ -43,16 +46,20 @@ type Hook = (event: QueryEvent) => Promise<void> | void;
 // Wrap real Tx methods only to schedule races; all SQL/results use the real DB.
 class ObservedDB extends DB {
   hook: Hook = () => {};
+  transformSQL = (sql: string) => sql;
 
   override async begin(): Promise<Tx> {
+    await this.hook({ phase: "before", sql: "BEGIN", args: [], pid: 0 });
     const tx = await super.begin();
     const { pid } = (await tx.get<{ pid: number }>("SELECT pg_backend_pid() AS pid"))!;
+    await this.hook({ phase: "after", sql: "BEGIN", args: [], pid });
     return new Proxy(tx, {
       get: (target, property) => {
         const value = Reflect.get(target, property, target);
         if (typeof value !== "function") return value;
         if (!["get", "select", "exec", "commit"].includes(String(property))) return value.bind(target);
         return async (...args: unknown[]) => {
+          if (property !== "commit") args[0] = this.transformSQL(String(args[0]));
           const event = { sql: property === "commit" ? "COMMIT" : String(args[0]), args: args.slice(1), pid };
           await this.hook({ ...event, phase: "before" });
           const result = await value.apply(target, args);
@@ -71,7 +78,8 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     "--label", "isucon15.test=post-window-lock", "--publish", "127.0.0.1::5432",
     "--tmpfs", "/var/lib/postgresql/data", "--env", "POSTGRES_HOST_AUTH_METHOD=trust",
     "--env", "POSTGRES_DB=post_window_test", "postgres:16",
-    "-c", "statement_timeout=5000", "-c", "log_statement=none"], { timeout: 20000 });
+    "-c", "statement_timeout=5000", "-c", "log_statement=none",
+    "-c", "track_commit_timestamp=on"], { timeout: 20000 });
   t.after(async () => {
     await admin?.end();
     await docker("docker", ["stop", "--time", "1", container], { timeout: 10000 });
@@ -106,6 +114,7 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     await control.connect();
     // The production schema is loaded only into this new, empty database.
     await control.query(schema);
+    await control.query(await readFile(new URL("../../sql/migrations/20261031-post-db-call.up.sql", import.meta.url), "utf8"));
     const config: Config = { region: "asia", dbHost: "127.0.0.1", dbPort: String(port), dbUser: "postgres",
       dbPassword: "", dbName: database, logLevel: "error" };
     const db = new ObservedDB(config, 8);
@@ -118,6 +127,12 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     });
     const context = { db, config, ipBans: new IPBanList() };
     app.post("/api/posts", createPostHandler(context));
+    // e752f2c's immediate image preparation, with the identical four DB calls.
+    app.post("/test/e752/posts", createPostHandler(context, async (image) => {
+      const data = Buffer.from(await image.arrayBuffer());
+      return { data, image: decodeJPEG(data) };
+    }));
+    app.post("/test/legacy/posts", legacyCreatePostHandler(context));
     app.delete("/api/posts/:postId", deletePostHandler(context));
     app.post("/api/admin/posting-window", openPostingWindowHandler(context));
     app.patch("/api/me", updateMeHandler(context));
@@ -153,13 +168,14 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
       pending.push(result);
       return result;
     }
-    function post(user = "alice") {
+    function post(user = "alice", path = "/api/posts", options: { image?: Uint8Array; visibility?: string; location?: Record<string, string> } = {}) {
       const body = new FormData();
-      body.set("image", new Blob([new Uint8Array(image)], { type: "image/jpeg" }), "test.jpg");
-      body.set("caption", "synthetic");
-      body.set("visibility", "friends");
+      body.set("image", new Blob([new Uint8Array(options.image ?? image)], { type: "image/jpeg" }), "test.jpg");
+      body.set("caption", "synthetic 日本語📸");
+      body.set("visibility", options.visibility ?? "friends");
       body.set("location_kind", "none");
-      return request("/api/posts", { method: "POST", body }, user);
+      for (const [key, value] of Object.entries(options.location ?? {})) body.set(key, value);
+      return request(path, { method: "POST", body }, user);
     }
     function open(localDate = "2026-11-01", region = "asia") {
       return request("/api/admin/posting-window", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -318,7 +334,7 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
   await t.test("different users finish concurrently; image/post become visible together; friends feed sees both", async (st) => {
     const f = await fixture(st);
     const gate = f.gate();
-    f.db.hook = (e) => { if (e.phase === "after" && e.sql.startsWith("INSERT INTO image_objects") && e.args[1] === "alice") return gate.hold(e); };
+    f.db.hook = (e) => { if (e.phase === "after" && isPostSave(e.sql) && e.args[1] === "alice") return gate.hold(e); };
     const first = f.post();
     await within(gate.reached);
     assert.deepEqual(await f.counts(), { posts: 0, images: 0, deleted: 0 });
@@ -345,7 +361,7 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     let userLocks = 0;
     f.db.hook = (e) => {
       if (e.phase === "before" && isUserLock(e.sql) && ++userLocks === 2) waiting.resolve(e);
-      if (e.phase === "after" && e.sql.startsWith("INSERT INTO image_objects")) return gate.hold(e);
+      if (e.phase === "after" && isPostSave(e.sql)) return gate.hold(e);
     };
     const first = f.post();
     const holder = await within(gate.reached);
@@ -383,7 +399,7 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     assert.equal((await f.control.query("SELECT count(*)::int AS n FROM notifications WHERE posting_window_id = $1", [next.id])).rows[0].n, 2);
   });
 
-  await t.test("switch-first rechecks the ended row, retries with a fresh snapshot and keeps the retry lock shared", async (st) => {
+  await t.test("switch-first prepares from a fresh snapshot and keeps the successor window lock shared", async (st) => {
     const f = await fixture(st);
     const adminGate = f.gate();
     const retryGate = f.gate();
@@ -391,14 +407,14 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     const closeStarted = Promise.withResolvers<QueryEvent>();
     let firstAdmin = true;
     let postingPID = 0;
-    const results: unknown[] = [];
+    let preparedWindow: string | undefined;
     f.db.hook = (e) => {
       if (e.phase === "before" && e.sql === "COMMIT" && firstAdmin) { firstAdmin = false; return adminGate.hold(e); }
-      if (isWindowSelect(e.sql)) {
+      if (isPrepare(e.sql)) {
         if (e.phase === "before" && !postingPID) { postingPID = e.pid; searchStarted.resolve(e); }
         if (e.phase === "after" && e.pid === postingPID) {
-          results.push(e.result);
-          if (results.length === 2) return retryGate.hold(e);
+          preparedWindow = (e.result as { window_id: string }).window_id;
+          return retryGate.hold(e);
         }
       }
       if (e.phase === "before" && isWindowEnd(e.sql) && !firstAdmin) closeStarted.resolve(e);
@@ -411,9 +427,7 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     assert.equal((await switching).status, 201);
     const next = await (await switching).json();
     const retryHolder = await within(retryGate.reached);
-    assert.equal(results.length, 2);
-    assert.equal(results[0], undefined);
-    assert.equal((results[1] as { id: string }).id, next.id);
+    assert.equal(preparedWindow, next.id);
     const second = await within(f.post("bob"), "retry query serialized another user");
     assert.equal(second.status, 201);
     const closing = f.open("2026-11-02");
@@ -428,10 +442,10 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     const f = await fixture(st);
     await f.control.query("UPDATE posting_windows SET ended_at = clock_timestamp() WHERE region = 'asia'");
     let searches = 0;
-    f.db.hook = (e) => { if (e.phase === "after" && isWindowSelect(e.sql)) searches++; };
+    f.db.hook = (e) => { if (e.phase === "after" && isPrepare(e.sql)) searches++; };
     const response = await f.post();
     assert.equal(response.status, 409);
-    assert.equal(searches, 2);
+    assert.equal(searches, 1);
     assert.deepEqual(await f.counts(), { posts: 0, images: 0, deleted: 0 });
   });
 
@@ -440,7 +454,7 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
     const gate = f.gate();
     const moving = Promise.withResolvers<QueryEvent>();
     f.db.hook = (e) => {
-      if (e.phase === "after" && isWindowSelect(e.sql)) return gate.hold(e);
+      if (e.phase === "after" && isPrepare(e.sql)) return gate.hold(e);
       if (e.phase === "before" && e.sql.startsWith("UPDATE users SET")) moving.resolve(e);
     };
     const posting = f.post();
@@ -504,15 +518,286 @@ test("post window locking / isolated PostgreSQL 16", { skip: !enabled, timeout: 
   await t.test("failure after real image INSERT rolls back both records and releases locks", async (st) => {
     const f = await fixture(st);
     await f.control.query(`CREATE FUNCTION reject_test_post() RETURNS trigger LANGUAGE plpgsql AS $$
-      BEGIN RAISE EXCEPTION 'synthetic post insert failure'; END $$;
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM image_objects WHERE id = NEW.image_id) THEN
+          RAISE EXCEPTION 'image must have been inserted first';
+        END IF;
+        RAISE EXCEPTION 'synthetic post insert failure after image';
+      END $$;
       CREATE TRIGGER reject_test_post BEFORE INSERT ON posts FOR EACH ROW EXECUTE FUNCTION reject_test_post()`);
-    let imageInserted = false;
-    f.db.hook = (e) => { if (e.phase === "after" && e.sql.startsWith("INSERT INTO image_objects")) imageInserted = true; };
-    assert.equal((await f.post()).status, 500);
-    assert.ok(imageInserted);
+    const response = await f.post();
+    assert.equal(response.status, 500);
+    assert.equal((await response.json()).error, "synthetic post insert failure after image");
     assert.deepEqual(await f.counts(), { posts: 0, images: 0, deleted: 0 });
     await f.control.query("DROP TRIGGER reject_test_post ON posts");
     assert.equal((await f.post()).status, 201);
+    assert.deepEqual(await f.counts(), { posts: 1, images: 1, deleted: 0 });
+  });
+
+  await t.test("post-first deletion waits and the replacement remains limited to two deletions", async (st) => {
+    const f = await fixture(st);
+    const first = await f.post();
+    const id = (await first.json()).id;
+    const gate = f.gate();
+    const waiting = Promise.withResolvers<QueryEvent>();
+    f.db.hook = (e) => {
+      if (e.phase === "after" && isPrepare(e.sql)) return gate.hold(e);
+      if (e.phase === "before" && isUserLock(e.sql) && !isPrepare(e.sql)) waiting.resolve(e);
+    };
+    const posting = f.post(); // rejects after the held count read
+    const holder = await within(gate.reached);
+    const deleting = f.request(`/api/posts/${id}`, { method: "DELETE" });
+    await f.blocked((await within(waiting.promise)).pid, holder.pid);
+    gate.release();
+    assert.equal((await posting).status, 409);
+    assert.equal((await deleting).status, 204);
+    f.db.hook = () => {};
+    assert.equal((await f.post()).status, 201);
+    assert.deepEqual(await f.counts(), { posts: 2, images: 2, deleted: 1 });
+  });
+
+  for (const first of ["post", "withdrawal"] as const) {
+    await t.test(`${first} first serializes withdrawal and post without reviving the account`, async (st) => {
+      const f = await fixture(st);
+      const gate = f.gate();
+      const waiting = Promise.withResolvers<QueryEvent>();
+      let held = false;
+      f.db.hook = (e) => {
+        const hold = first === "post" ? isPrepare(e.sql) : e.sql.startsWith("UPDATE users SET status");
+        const wait = first === "post" ? isUserLock(e.sql) && !isPrepare(e.sql) : isPrepare(e.sql);
+        if (e.phase === "after" && hold && !held) { held = true; return gate.hold(e); }
+        if (e.phase === "before" && wait) waiting.resolve(e);
+      };
+      const a = first === "post" ? f.post() : f.request("/api/me", { method: "DELETE" });
+      const holder = await within(gate.reached);
+      const b = first === "post" ? f.request("/api/me", { method: "DELETE" }) : f.post();
+      await f.blocked((await within(waiting.promise)).pid, holder.pid);
+      gate.release();
+      const [ra, rb] = await Promise.all([a, b]);
+      assert.equal((first === "post" ? ra : rb).status, first === "post" ? 201 : 500);
+      // Missing active user keeps the old must()/NoRowsError behavior.
+      if (first === "withdrawal") assert.deepEqual(await rb.json(), { error: "sql: no rows in result set" });
+      assert.equal((await f.control.query("SELECT status FROM users WHERE id='alice'")).rows[0].status, "deleted");
+      assert.equal((await f.control.query("SELECT count(*)::int AS n FROM posts WHERE deleted_at IS NULL")).rows[0].n, first === "post" ? 1 : 0);
+    });
+  }
+
+  await t.test("postedAt uses the application clock after prepare, with microsecond deadline boundaries", async (st) => {
+    const f = await fixture(st);
+    const deadline = Temporal.Instant.from("2026-10-31T12:00:00.123456Z");
+    await f.control.query("UPDATE posting_windows SET starts_at=$1, on_time_deadline=$2 WHERE id='asia-old'",
+      [deadline.subtract({ seconds: 60 }).toString(), deadline.toString()]);
+    let appTime = deadline.subtract({ seconds: 120 });
+    st.mock.method(Temporal.Now, "instant", () => appTime);
+    let sampledAfterPrepare = 0;
+    f.db.hook = (e) => {
+      if (e.phase === "after" && isPrepare(e.sql)) { appTime = deadline; sampledAfterPrepare++; }
+    };
+    const onTime = await f.post();
+    assert.equal(onTime.status, 201);
+    const body = await onTime.json();
+    assert.equal(body.postedAt, deadline.toString());
+    assert.equal(body.onTime, true);
+    assert.equal(body.lateSeconds, 0);
+    const stored = (await f.control.query("SELECT p.posted_at, i.created_at, i.data FROM posts p JOIN image_objects i ON i.id=p.image_id")).rows[0];
+    assert.equal(stored.posted_at.getTime(), stored.created_at.getTime());
+    assert.deepEqual(stored.data, image);
+    assert.equal(sampledAfterPrepare, 1);
+    await f.control.query("DELETE FROM posts; DELETE FROM image_objects");
+    f.db.hook = () => {};
+    for (const [microseconds, seconds] of [[1, 0], [999999, 0], [1000000, 1], [2000001, 2]]) {
+      appTime = deadline.add({ microseconds });
+      const late = await f.post();
+      assert.equal(late.status, 201);
+      const item = await late.json();
+      assert.equal(item.postedAt, appTime.toString());
+      assert.equal(item.onTime, false);
+      assert.equal(item.lateSeconds, seconds);
+      await f.control.query("DELETE FROM posts; DELETE FROM image_objects");
+    }
+    appTime = deadline.subtract({ seconds: 61 });
+    assert.equal((await f.post()).status, 409);
+    assert.deepEqual(await f.counts(), { posts: 0, images: 0, deleted: 0 });
+  });
+
+  await t.test("image bytes and every saved post attribute match the legacy path", async (st) => {
+    const f = await fixture(st);
+    const locations: Record<string, string>[] = [{ location_kind: "none" },
+      { location_kind: "exact", latitude: "-90", longitude: "180" },
+      { location_kind: "approximate", locality: "東京都 📍" }];
+    for (const visibility of ["friends", "friends_of_friends", "public"]) {
+      for (const location of locations) {
+        const results = [];
+        for (const path of ["/test/legacy/posts", "/api/posts"]) {
+          const response = await f.post("alice", path, { visibility, location });
+          assert.equal(response.status, 201);
+          const body = await response.json();
+          const saved = (await f.control.query(`SELECT caption, visibility, location_kind, latitude, longitude, locality,
+            author_id, posting_window_id, data, owner_user_id, media_type,
+            p.posted_at = i.created_at AS equal_timestamp
+            FROM posts p JOIN image_objects i ON i.id = p.image_id`)).rows[0];
+          assert.equal(saved.equal_timestamp, true);
+          assert.deepEqual(saved.data, image);
+          results.push({ saved, author: body.author, location: body.location, onTime: body.onTime, lateSeconds: body.lateSeconds });
+          await f.control.query("DELETE FROM posts; DELETE FROM image_objects");
+        }
+        assert.deepEqual(results[1], results[0]);
+      }
+    }
+    let began = 0;
+    f.db.hook = (e) => { if (e.sql === "BEGIN" && e.phase === "before") began++; };
+    const invalid = await f.post("alice", "/api/posts", { image: new Uint8Array([1, 2, 3]) });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(await invalid.json(), { error: "invalid_post" });
+    assert.equal(began, 0);
+  });
+
+  await t.test("migration reapplication, fresh schema recreation and down/up keep the write path usable", async (st) => {
+    const f = await fixture(st);
+    const up = await readFile(new URL("../../sql/migrations/20261031-post-db-call.up.sql", import.meta.url), "utf8");
+    await f.control.query(up);
+    await f.control.query(await readFile(new URL("../../sql/003-initial-snapshot.sql", import.meta.url), "utf8"));
+    assert.equal((await f.post()).status, 201);
+    await f.control.query(await readFile(new URL("../../sql/reset.sql", import.meta.url), "utf8"));
+    await f.control.query("SET session_replication_role=origin");
+    assert.deepEqual(await f.counts(), { posts: 0, images: 0, deleted: 0 });
+    assert.equal((await f.post()).status, 201);
+    // schema bootstrap drops/recreates tables, while reset.sql only deletes rows.
+    await f.control.query(schema);
+    await f.control.query(`INSERT INTO users(id, username, secret_key_hash, display_name, region)
+      VALUES ('alice','alice',repeat('0',64),'Alice','asia');
+      INSERT INTO posting_windows(id,region,local_date,starts_at,on_time_deadline)
+      VALUES ('asia-old','asia','2026-10-31',clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 hour')`);
+    assert.equal((await f.post()).status, 201);
+    await f.control.query(await readFile(new URL("../../sql/migrations/20261031-post-db-call.down.sql", import.meta.url), "utf8"));
+    assert.equal((await f.control.query("SELECT to_regprocedure('public.isureal_prepare_post(text)') AS f")).rows[0].f, null);
+    await f.control.query("DELETE FROM posts; DELETE FROM image_objects");
+    assert.equal((await f.post("alice", "/test/legacy/posts")).status, 201);
+    await f.control.query(up);
+    await f.control.query(`CREATE ROLE post_call_writer;
+      GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO post_call_writer;
+      SET ROLE post_call_writer;
+      BEGIN`);
+    try {
+      const prepared = (await f.control.query("SELECT * FROM public.isureal_prepare_post('alice')")).rows[0];
+      assert.equal(prepared.author.id, "alice");
+      assert.equal(prepared.active, "1");
+    } finally { await f.control.query("ROLLBACK; RESET ROLE"); }
+  });
+
+  await t.test("same-condition legacy/new comparison: SQL calls, DB Tx and user-lock holding time", async (st) => {
+    const f = await fixture(st);
+    await f.control.query(`CREATE TABLE post_call_timing(xid xid NOT NULL, began_at timestamptz NOT NULL, locked_at timestamptz NOT NULL)`);
+    // Only this synthetic fixture instruments the lock acquisition. Commit times
+    // come from PG's track_commit_timestamp, so both durations use the DB clock.
+    const up = await readFile(new URL("../../sql/migrations/20261031-post-db-call.up.sql", import.meta.url), "utf8");
+    await f.control.query(up.replace("FOR NO KEY UPDATE;", `FOR NO KEY UPDATE;
+      INSERT INTO post_call_timing VALUES(pg_current_xact_id()::text::xid, transaction_timestamp(), clock_timestamp());`));
+    f.db.transformSQL = (sql) => isUserLock(sql) && !isPrepare(sql) ? `WITH locked AS MATERIALIZED (${sql}),
+      timing AS (INSERT INTO post_call_timing SELECT pg_current_xact_id()::text::xid,
+        transaction_timestamp(), clock_timestamp() FROM locked RETURNING xid)
+      SELECT locked.* FROM locked CROSS JOIN timing` : sql;
+    for (const delay of [0, 30]) {
+      const measurements: Record<string, { calls: number; tx: number; lock: number; http: number }[]> = { legacy: [], current: [] };
+      for (const [index, mode] of ["legacy", "current", "legacy", "current", "current", "legacy", "legacy", "current", "current", "legacy"].entries()) {
+        let calls = 0;
+        f.db.hook = async (e) => {
+          if (e.phase === "before") calls++;
+          if (e.phase === "after" && delay) await sleep(delay);
+        };
+        const started = performance.now();
+        const response = await f.post("alice", mode === "legacy" ? "/test/legacy/posts" : "/api/posts");
+        const http = performance.now() - started;
+        assert.equal(response.status, 201);
+        assert.equal(calls, mode === "legacy" ? 7 : 4);
+        const timing = (await f.control.query(`SELECT
+          (extract(epoch FROM (pg_xact_commit_timestamp(xid)-began_at))*1000)::float8 AS tx,
+          (extract(epoch FROM (pg_xact_commit_timestamp(xid)-locked_at))*1000)::float8 AS lock
+          FROM post_call_timing`)).rows[0];
+        assert.ok(timing.tx >= timing.lock && timing.lock >= 0);
+        if (index >= 2) measurements[mode].push({ calls, tx: timing.tx, lock: timing.lock, http });
+        await f.control.query("DELETE FROM posts; DELETE FROM image_objects; DELETE FROM post_call_timing");
+      }
+      const means = Object.fromEntries(Object.entries(measurements).map(([mode, rows]) => [mode,
+        Object.fromEntries(["calls", "tx", "lock", "http"].map(key => [key,
+          Number((rows.reduce((sum, row) => sum + row[key as keyof typeof row], 0) / rows.length).toFixed(3))]))]));
+      st.diagnostic(`synthetic per-SQL return delay=${delay}ms; 1 warmup + 4 samples/mode; ${JSON.stringify(means)}`);
+    }
+  });
+
+  await t.test("multipart decode burst: ready DB replies and friends feed progress between image preparations", async (st) => {
+    const pixels = Buffer.alloc(512 * 512 * 4);
+    let seed = 42;
+    for (let i = 0; i < pixels.length; i += 4) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      pixels[i] = seed & 255; pixels[i + 1] = (seed >>> 8) & 255; pixels[i + 2] = (seed >>> 16) & 255; pixels[i + 3] = 255;
+    }
+    const burstImage = jpeg.encode({ data: pixels, width: 512, height: 512 }, 80).data;
+    assert.ok(decodeJPEG(burstImage)); // warm the same decoder before either mode
+    const measurements: Record<string, { post: number; feed: number; timer: number; lock: number; burst: number }[]> = { immediate: [], fair: [] };
+    for (const mode of ["immediate", "fair", "fair", "immediate"] as const) {
+      const f = await fixture(st);
+      await f.control.query(`CREATE TABLE preparation_timing(user_id text, xid xid, locked_at timestamptz)`);
+      const up = await readFile(new URL("../../sql/migrations/20261031-post-db-call.up.sql", import.meta.url), "utf8");
+      await f.control.query(up.replace("FOR NO KEY UPDATE;", `FOR NO KEY UPDATE;
+        INSERT INTO preparation_timing VALUES(p_user_id, pg_current_xact_id()::text::xid, clock_timestamp());`));
+      await f.control.query(`INSERT INTO users(id,username,secret_key_hash,display_name,region)
+        SELECT 'burst-'||i,'burst-'||i,repeat('0',64),'Synthetic','asia' FROM generate_series(1,8) AS i`);
+      const path = mode === "immediate" ? "/test/e752/posts" : "/api/posts";
+      assert.equal((await f.post("bob", path)).status, 201);
+      const prepared = Promise.withResolvers<void>();
+      let initialPost = true;
+      f.db.hook = async (e) => {
+        if (e.phase === "after" && isPrepare(e.sql) && e.args[0] === "alice" && initialPost) {
+          initialPost = false;
+          prepared.resolve();
+          // Same small application-side wait in both modes; another request's
+          // image preparation must not turn this into a whole burst's delay.
+          await sleep(30);
+        }
+      };
+      const posting = f.post("alice", path);
+      await within(prepared.promise);
+      const started = performance.now();
+      const timer = sleep(10).then(() => performance.now() - started - 10);
+      const feed = f.request("/api/feeds/friends", {}, "bob").then(r => ({ response: r, elapsed: performance.now() - started }));
+      const burst = Array.from({ length: 8 }, (_, i) => f.post(`burst-${i + 1}`, path, { image: burstImage }));
+      const first = await posting;
+      const postMs = performance.now() - started;
+      assert.equal(first.status, 201);
+      assert.ok((await Promise.all(burst)).every(r => r.status === 201));
+      const burstMs = performance.now() - started;
+      const feedResult = await feed;
+      assert.equal(feedResult.response.status, 200);
+      assert.deepEqual(await f.counts(), { posts: 10, images: 10, deleted: 0 });
+      const lock = (await f.control.query(`SELECT
+        (extract(epoch FROM (pg_xact_commit_timestamp(xid)-locked_at))*1000)::float8 AS ms
+        FROM preparation_timing WHERE user_id='alice'`)).rows[0].ms;
+      measurements[mode].push({ post: postMs, feed: feedResult.elapsed, timer: await timer, lock, burst: burstMs });
+    }
+    st.diagnostic(`same four SQL calls; 8 concurrent real 512x512 JPEG uploads; ABBA; ${JSON.stringify(measurements)}`);
+  });
+
+  await t.test("failed image preparation does not poison later queued posts or acquire DB locks", async (st) => {
+    const f = await fixture(st);
+    const readImage = File.prototype.arrayBuffer;
+    let fail = true;
+    let began = 0;
+    st.mock.method(File.prototype, "arrayBuffer", function (this: File) {
+      if (fail) { fail = false; return Promise.reject(new Error("synthetic image read failure")); }
+      return readImage.call(this);
+    });
+    f.db.hook = (e) => { if (e.phase === "before" && e.sql === "BEGIN") began++; };
+    const failed = await f.post();
+    assert.equal(failed.status, 500);
+    assert.deepEqual(await failed.json(), { error: "synthetic image read failure" });
+    assert.equal(began, 0);
+    const results = await Promise.all([
+      f.post("alice", "/api/posts", { image: new Uint8Array([1, 2, 3]) }),
+      f.post("alice"),
+    ]);
+    assert.deepEqual(results.map(r => r.status), [400, 201]);
+    assert.equal(began, 1);
     assert.deepEqual(await f.counts(), { posts: 1, images: 1, deleted: 0 });
   });
 });

@@ -1,17 +1,18 @@
 import { randomUUID } from "node:crypto";
+import { setImmediate as yieldToIO } from "node:timers/promises";
 import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
 import { must, type Row } from "./db.ts";
 import { signedImageURL } from "./image_signature.ts";
-import { decodeJPEG } from "./jpeg.ts";
+import { decodeJPEG, type JPEGImage } from "./jpeg.ts";
 import { getPostPermissions, postColumns, postFromRow, getPost, getPostWithAuthor, selectPostsWithAuthor, validLocation, type Post, type PostLocation } from "./post.ts";
 import { getPostingWindow } from "./posting_window.ts";
 import { jsonResponse, noContent } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
 import { getSession } from "./session.ts";
 import { now } from "./time.ts";
-import { getUser, setImageKey, userColumns, userFromRow, validUserText, type User } from "./user.ts";
+import { getUser, setImageKey, userFromRow, validUserText, type User } from "./user.ts";
 import { newGetMeResponse } from "./user_api.ts";
 
 const createPostRequest = {
@@ -53,7 +54,26 @@ export type PostResponse = {
   lateSeconds: number;
 };
 
-export function createPostHandler(h: HandlerContext): Handler<Env> {
+type PreparedImage = { data: Buffer; image: JPEGImage | null };
+type PrepareImage = (image: File) => Promise<PreparedImage>;
+
+function createImagePreparer(): PrepareImage {
+  // Yield to I/O between serial image preparations. Multipart completions can
+  // otherwise run decodes back-to-back while ready DB replies wait in poll.
+  // This request holds no DB connection or row lock while waiting here.
+  let preparation = Promise.resolve();
+  return (image) => {
+    const prepared = preparation.then(async () => {
+      await yieldToIO();
+      const data = Buffer.from(await image.arrayBuffer());
+      return { data, image: decodeJPEG(data) };
+    });
+    preparation = prepared.then(() => {}, () => {});
+    return prepared;
+  };
+}
+
+export function createPostHandler(h: HandlerContext, prepareImage = createImagePreparer()): Handler<Env> {
   return async (c) => {
     const input = await bind(c, createPostRequest);
     if (input.image === null || !validUserText(input.caption, 0, 1000)) {
@@ -76,8 +96,7 @@ export function createPostHandler(h: HandlerContext): Handler<Env> {
     if (!validLocation(location)) {
       throw new APIError(400, "invalid_post");
     }
-    const imageData = Buffer.from(await input.image.arrayBuffer());
-    const img = decodeJPEG(imageData);
+    const { data: imageData, image: img } = await prepareImage(input.image);
     if (!img) {
       throw new APIError(400, "invalid_post");
     }
@@ -87,59 +106,36 @@ export function createPostHandler(h: HandlerContext): Handler<Env> {
 
     const userID = getSession(c)!.userID;
     await using tx = await h.db.begin();
-    const userRow = must(await tx.get<Row>(`SELECT ${userColumns.join(", ")} FROM users WHERE id = $1 AND status = 'active' FOR NO KEY UPDATE`, userID));
-    const user = userFromRow(userRow);
+    // Keep application-clock sampling after locks and the fresh count query.
+    // An autocommit function cannot call now() back in this process at that point.
+    const prepared = must(await tx.get<{
+      author: Row; window_id: string | null; starts_at: Temporal.Instant | null;
+      active: number | null; deleted: number | null;
+    }>(`SELECT * FROM public.isureal_prepare_post($1)`, userID));
+    const user = userFromRow(prepared.author);
     setImageKey(user);
-    type WindowRow = { id: string; local_date: string; starts_at: Temporal.Instant };
-    // 投稿同士は共有し、期間終了の UPDATE は COMMIT まで待たせる。
-    let window = await tx.get<WindowRow>(
-      `SELECT id, local_date, starts_at FROM posting_windows WHERE region = $1 AND ended_at IS NULL FOR SHARE`,
-      user.region,
-    );
-    if (!window) {
-      window = await tx.get<WindowRow>(
-        `SELECT id, local_date, starts_at FROM posting_windows WHERE region = $1 AND ended_at IS NULL FOR SHARE`,
-        user.region,
-      );
-    }
-    if (!window) {
+    if (prepared.window_id === null) {
       throw new APIError(409, "post_slot_unavailable");
     }
-    const counts = must(
-      await tx.get<{ active: number; deleted: number }>(
-        `
-   SELECT count(*) FILTER (WHERE deleted_at IS NULL) AS active,
-          count(*) FILTER (WHERE deleted_at IS NOT NULL) AS deleted
-   FROM posts p JOIN posting_windows w ON w.id = p.posting_window_id
-   WHERE p.author_id = $1 AND w.local_date = $2
-  `,
-        userID,
-        window.local_date,
-      ),
-    );
     const postedAt = now();
-    if (counts.active !== 0 || counts.deleted >= 2 || Temporal.Instant.compare(postedAt, window.starts_at) < 0) {
+    if (prepared.active !== 0 || prepared.deleted! >= 2 || Temporal.Instant.compare(postedAt, prepared.starts_at!) < 0) {
       throw new APIError(409, "post_slot_unavailable");
     }
     const imageID = randomUUID();
-    await tx.exec(
-      `INSERT INTO image_objects (id, owner_user_id, data, media_type, created_at) VALUES ($1, $2, $3, 'image/jpeg', $4)`,
-      imageID,
-      userID,
-      imageData,
-      postedAt,
-    );
     const postID = randomUUID();
     const postRow = must(await tx.get<Row>(
       `
-   WITH p AS (INSERT INTO posts (id, author_id, posting_window_id, image_id, caption, visibility,
+   WITH image AS (
+     INSERT INTO image_objects (id, owner_user_id, data, media_type, created_at)
+     VALUES ($4, $2, $12, 'image/jpeg', $11) RETURNING id
+   ), p AS (INSERT INTO posts (id, author_id, posting_window_id, image_id, caption, visibility,
                       location_kind, latitude, longitude, locality, posted_at)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *)
+   SELECT $1, $2, $3, image.id, $5, $6, $7, $8, $9, $10, $11 FROM image RETURNING *)
    SELECT ${postColumns} FROM p JOIN posting_windows w ON w.id = p.posting_window_id
   `,
       postID,
       userID,
-      window.id,
+      prepared.window_id,
       imageID,
       input.caption,
       input.visibility,
@@ -148,6 +144,7 @@ export function createPostHandler(h: HandlerContext): Handler<Env> {
       location.longitude,
       location.locality,
       postedAt,
+      imageData,
     ));
     const post = postFromRow(postRow);
     await tx.commit();

@@ -30,6 +30,7 @@ test("認証・権限・RETURNING / 新規ローカルPostgreSQL", { skip: !port
   await control.connect();
   t.after(() => control.end());
   await control.query(await readFile(new URL("../../sql/001-schema.sql", import.meta.url), "utf8"));
+  await control.query(await readFile(new URL("../../sql/migrations/20261031-post-db-call.up.sql", import.meta.url), "utf8"));
   const config = { region: "asia", dbHost: "127.0.0.1", dbPort: port!, dbUser: "postgres", dbPassword: "", dbName: database, logLevel: "error" };
   const realDB = new DB(config, 4);
   t.after(() => realDB.end());
@@ -188,7 +189,7 @@ test("認証・権限・RETURNING / 新規ローカルPostgreSQL", { skip: !port
       sqls.length = 0;
       const response = await upload("/posts", tokens.get(name)!);
       assert.equal(response.status, 201, await response.clone().text());
-      assert.equal(sqls.length, 6);
+      assert.equal(sqls.length, 3); // session + prepare + image/post (BEGIN/COMMIT excluded)
       const body = await response.json();
       assert.equal(body.caption, "caption");
       assert.equal(body.onTime, true);
