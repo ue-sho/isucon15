@@ -9,16 +9,17 @@ import pg from "pg";
 import { apiErrorHandler } from "../../src/api_error.ts";
 import { DB } from "../../src/db.ts";
 import type { Env, HandlerContext } from "../../src/server.ts";
+import type { User } from "../../src/user.ts";
 
 export const baseline = "60b1f560d2427edf401aa12c3a2f2b83df081ef4";
 export const stamp = Temporal.Instant.from("2026-10-31T04:00:00Z");
 const project = fileURLToPath(new URL("../..", import.meta.url));
 
 // Gitに記録された変更前の全srcを読み出す。現在の実装から期待値を作らない。
-export async function legacyFeed() {
+export async function legacyFeed(reference = baseline) {
   const directory = await mkdtemp(join(tmpdir(), "isucon19-friends-reference-"));
   try {
-    const archive = execFileSync("git", ["archive", baseline, "webapp/nodejs/src"], { cwd: join(project, "../..") });
+    const archive = execFileSync("git", ["archive", reference, "webapp/nodejs/src"], { cwd: join(project, "../..") });
     execFileSync("tar", ["-x", "-C", directory], { input: archive });
     await symlink(join(project, "node_modules"), join(directory, "webapp/nodejs/node_modules"));
     const module = await import(pathToFileURL(join(directory, "webapp/nodejs/src/feed_api.ts")).href);
@@ -140,11 +141,11 @@ export async function fixture(admin: pg.Client, friends = 110, unrelated = 0, hi
   await admin.query("ANALYZE");
 }
 
-export function appFor(handler: (h: HandlerContext) => Handler<Env>, db: DB, userID = "viewer", errorHandler = apiErrorHandler) {
+export function appFor(handler: (h: HandlerContext) => Handler<Env>, db: DB, userID = "viewer", errorHandler = apiErrorHandler, user?: User) {
   const app = new Hono<Env>().onError(errorHandler);
   app.use("*", async (c, next) => {
-    // session.regionを古い値に固定し、閲覧者の現在地域をDBから読むことも検証する。
-    c.set("session", { userID, region: "asia", token: "", tokenHash: "", createdAt: stamp });
+    // Userを渡さない比較試験では古いsession.regionからDBの現在地域を読むことも検証する。
+    c.set("session", { userID, region: "asia", token: "", tokenHash: "", createdAt: stamp, ...(user ? { user } : {}) });
     await next();
   });
   app.get("/feeds/:feed", handler({ db } as HandlerContext));

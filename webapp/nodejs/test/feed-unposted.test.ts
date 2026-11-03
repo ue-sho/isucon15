@@ -87,8 +87,8 @@ test("unposted feeds with PostgreSQL", { skip: !port }, async (t) => {
       const result = await request(`/feeds/${feed}`);
       assert.equal(result.status, 200);
       assert.deepEqual(result.body, { items: [], hasMore: false });
-      assert.equal(result.queries.length, feed === "friends" ? 1 : 2);
-      if (feed === "friends") {
+      assert.equal(result.queries.length, feed === "public" ? 2 : 1);
+      if (feed !== "public") {
         assert.ok(result.queries[0].includes("WITH active_windows AS MATERIALIZED"));
       } else {
         assert.ok(result.queries[0].includes("FROM users"));
