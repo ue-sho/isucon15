@@ -2,11 +2,10 @@ import type { Handler } from "hono";
 import { APIError } from "./api_error.ts";
 import { bind } from "./bind.ts";
 import { newCommentResponse, type CommentResponse } from "./comment_api.ts";
-import { selectCommentsWithAuthor } from "./comment.ts";
 import type { Queryer } from "./db.ts";
 import { selectPostsWithAuthor } from "./post.ts";
 import { newPostResponse, type PostResponse } from "./post_api.ts";
-import { selectCurrentRealMojis } from "./realmoji.ts";
+import { selectMemoryInteractions } from "./memory_interactions.ts";
 import { newRealMojiResponse, type RealMojiResponse } from "./realmoji_api.ts";
 import { jsonResponse } from "./response.ts";
 import type { Env, HandlerContext } from "./server.ts";
@@ -100,66 +99,33 @@ async function listMemories(
     beforeID,
   );
   const hasMore = posts.length > 50;
-  const items: MemoryPostResponse[] = posts.slice(0, 50).map((post) => ({
+  const page = posts.slice(0, 50);
+  // Finish both reads before response construction/signing; hold at most one connection.
+  const interactions = await selectMemoryInteractions(db, page.map(({ post }) => post.id));
+  const items: MemoryPostResponse[] = page.map((post) => ({
     ...newPostResponse(post.post, post.author),
     realmojis: [],
     comments: [],
   }));
-  await loadMemoryInteractions(db, items);
+  loadMemoryInteractions(interactions, items);
   return { items, hasMore };
 }
 
-async function loadMemoryInteractions(db: Queryer, items: MemoryPostResponse[]): Promise<void> {
-  if (items.length === 0) {
-    return;
-  }
-  const postIDs = items.map((item) => item.id);
+function loadMemoryInteractions(
+  { reactions, comments }: Awaited<ReturnType<typeof selectMemoryInteractions>>,
+  items: MemoryPostResponse[],
+): void {
   const itemByPostID = new Map(items.map((item) => [item.id, item]));
-  const reactions = await selectCurrentRealMojis(
-    memoryPostQueryer(db, postIDs, "DESC"),
-    `AND r.post_id = ANY($1::varchar[])`,
-  );
   for (const reaction of reactions) {
     const item = itemByPostID.get(reaction.realMoji.postID)!;
     if (item.realmojis.length < 50) {
       item.realmojis.push(newRealMojiResponse(reaction.realMoji, reaction.reactor));
     }
   }
-
-  const comments = await selectCommentsWithAuthor(
-    memoryPostQueryer(db, postIDs, "ASC"),
-    `AND c.post_id = ANY($1::varchar[])`,
-  );
   for (const comment of comments) {
     const item = itemByPostID.get(comment.comment.postID)!;
     if (item.comments.length < 50) {
       item.comments.push(newCommentResponse(comment.comment, comment.author));
     }
   }
-}
-
-// Reuse the shared selectors' filters and row mapping. Rank only eligible rows
-// after active/deleted/replaced filtering, with one SQL per interaction type.
-function memoryPostQueryer(db: Queryer, postIDs: string[], direction: "ASC" | "DESC"): Queryer {
-  return {
-    get<T>(sql: string, ...args: unknown[]): Promise<T | undefined> {
-      return db.get<T>(sql, ...args);
-    },
-    exec(sql: string, ...args: unknown[]): Promise<number> {
-      return db.exec(sql, ...args);
-    },
-    select<T>(sql: string): Promise<T[]> {
-      return db.select<T>(`
-        SELECT ranked.* FROM (
-          SELECT interaction.*, row_number() OVER (
-            PARTITION BY interaction.post_id
-            ORDER BY interaction.created_at ${direction}, interaction.id ${direction}
-          ) AS memory_rank
-          FROM (${sql}) AS interaction
-        ) AS ranked
-        WHERE ranked.memory_rank <= 50
-        ORDER BY ranked.post_id, ranked.created_at ${direction}, ranked.id ${direction}
-      `, postIDs);
-    },
-  };
 }
